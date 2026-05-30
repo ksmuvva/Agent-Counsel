@@ -1,12 +1,27 @@
-from typing import Dict, Any, Optional
+"""Dynamic agent creation driven by configuration."""
+from typing import Optional
+
 from .claude_agent import ClaudeAgent
 from .model_router import ModelRouter
 
-class AgentFactory:
-    def __init__(self, model_router: ModelRouter):
-        self.model_router = model_router
 
-    def create_agent(self, role: str, name: str, description: str, system_prompt: Optional[str] = None) -> ClaudeAgent:
-        """Creates an agent based on the specified role and configuration."""
-        model = self.model_router.get_model(role)
-        return ClaudeAgent(name, description, model, system_prompt)
+class AgentFactory:
+    """Creates agents with the model assigned by the router."""
+
+    def __init__(self, model_router: Optional[ModelRouter] = None):
+        self.model_router = model_router or ModelRouter()
+
+    def create_agent(
+        self,
+        name: str,
+        description: str,
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> ClaudeAgent:
+        resolved_model = model or self.model_router.get_model(name)
+        return ClaudeAgent(
+            name=name,
+            description=description,
+            model=resolved_model,
+            system_prompt=system_prompt,
+        )

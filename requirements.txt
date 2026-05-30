@@ -64,3 +64,14 @@ urllib3==2.7.0
 uvicorn==0.48.0
 watchdog==6.0.0
 websockets==16.0
+
+# Claude API (optional; enables online mode)
+anthropic
+
+# Document tooling (optional; enables real Excel/Word/PPT I/O)
+openpyxl
+python-docx
+python-pptx
+
+# Testing
+pytest

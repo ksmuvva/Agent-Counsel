@@ -1,54 +1,60 @@
+"""Command-line interface for the Multi-Agent Council System."""
+import json
+
 import typer
-from typing import Optional
-from core import CostTracker
-from agents import SMEPersonaManager
+
+from agents.sme_personas import SMEPersonaManager
 from config.agent_config import AGENT_ROLES
+from core import CouncilSystem
 
-app = typer.Typer()
+app = typer.Typer(help="Agent-Counsel: Multi-Agent Council System CLI")
 
-# Global instances
-cost_tracker = CostTracker()
-sme_manager = SMEPersonaManager(AGENT_ROLES["Dynamic SME Personas"], "claude-3-5-sonnet-20240620")
 
 @app.command()
-def run_task(task: str, agent: Optional[str] = None):
-    """Run a task with a specific agent or the orchestrator."""
-    typer.echo(f"Running task: {task}")
-    if agent:
-        typer.echo(f"Using agent: {agent}")
+def run(
+    task: str = typer.Argument(..., help="The task for the council to execute."),
+    budget: float = typer.Option(20.0, help="Spend budget in USD."),
+    enforce: bool = typer.Option(False, help="Abort if the budget is exceeded."),
+    json_output: bool = typer.Option(False, "--json", help="Emit the full result as JSON."),
+):
+    """Run a task through the full phase execution pipeline."""
+    system = CouncilSystem(budget=budget, enforce_budget=enforce, log=lambda m: typer.echo(f"  • {m}"))
+    typer.echo(f"Mode: {'ONLINE' if system.online else 'OFFLINE (simulation)'}")
+    result = system.run(task)
+
+    if json_output:
+        typer.echo(json.dumps(result.as_dict(), indent=2))
     else:
-        typer.echo("Using default Orchestrator agent")
+        typer.echo(f"\nTier: {result.tier} | Revised: {result.revised} | Passed: {result.passed}")
+        if result.selected_personas:
+            typer.echo(f"SME personas: {', '.join(result.selected_personas)}")
+        typer.echo("\n=== Final Verdict ===")
+        typer.echo(result.final_output)
+    typer.echo("\n=== Cost ===")
+    typer.echo(json.dumps(system.cost_summary(), indent=2))
 
-@app.command()
+
+@app.command("list-agents")
 def list_agents():
-    """List all available agents."""
-    typer.echo("Strategic Council Agents:")
-    for agent_name in AGENT_ROLES["Strategic Council"].keys():
-        typer.echo(f"  - {agent_name}")
-    
-    typer.echo("\nOperational Agents:")
-    for agent_name in AGENT_ROLES["Operational Agents"].keys():
-        typer.echo(f"  - {agent_name}")
+    """List all permanent agents and their assigned models."""
+    for group, agents in AGENT_ROLES.items():
+        typer.echo(f"\n{group}:")
+        for name, cfg in agents.items():
+            typer.echo(f"  - {name} [{cfg['model']}] — {cfg['description']}")
 
-@app.command()
+
+@app.command("list-personas")
 def list_personas():
-    """List all available SME personas."""
-    typer.echo("Available SME Personas:")
-    for persona_name in sme_manager.list_available_personas():
-        typer.echo(f"  - {persona_name}")
+    """List the available dynamic SME personas."""
+    for name in SMEPersonaManager().list_available():
+        typer.echo(f"  - {name}")
+
 
 @app.command()
-def get_costs():
-    """Display total costs."""
-    typer.echo(f"Total Cost: ${cost_tracker.get_total_cost():.4f}")
-    for agent_name, cost in cost_tracker.costs.items():
-        typer.echo(f"  - {agent_name}: ${cost:.4f}")
+def version():
+    """Show the version."""
+    typer.echo("Agent-Counsel 0.1.0")
 
-@app.command()
-def reset_costs():
-    """Reset all recorded costs."""
-    cost_tracker.reset()
-    typer.echo("Costs reset successfully.")
 
 if __name__ == "__main__":
     app()

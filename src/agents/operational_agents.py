@@ -1,79 +1,206 @@
-from typing import Any, Dict, Optional
+"""Tier 1-2 operational agents that execute the work."""
+import re
+from typing import Any, Dict, List, Optional
+
 from core.claude_agent import ClaudeAgent
+from config.models import OPUS, SONNET
 
-class OperationalAgent(ClaudeAgent):
-    """Base class for Operational Agents."""
-    def __init__(self, name: str, description: str, model: str, system_prompt: Optional[str] = None):
-        super().__init__(name, description, model, system_prompt)
 
-class Orchestrator(OperationalAgent):
-    """Parent agent, tier classification, coordination."""
-    def __init__(self, model: str):
-        system_prompt = "You are the Orchestrator. Your role is to coordinate all agents and manage the overall workflow."
-        super().__init__("Orchestrator", "Parent agent, tier classification, coordination", model, system_prompt)
+class Orchestrator(ClaudeAgent):
+    def __init__(self):
+        super().__init__(
+            name="Orchestrator",
+            description="Parent agent, tier classification, coordination",
+            model=OPUS,
+            system_prompt=(
+                "You are the Orchestrator. Classify task complexity into a tier "
+                "(1=trivial, 2=standard, 3=complex, 4=critical) and coordinate "
+                "the operational agents."
+            ),
+        )
 
-class TaskAnalyst(OperationalAgent):
-    """Task decomposition & requirements analysis."""
-    def __init__(self, model: str):
-        system_prompt = "You are the Task Analyst. Your role is to decompose tasks and analyze requirements."
-        super().__init__("Task Analyst", "Task decomposition & requirements analysis", model, system_prompt)
+    def classify_tier(self, task: str) -> int:
+        """Estimate task complexity tier from signal words and length.
 
-class Planner(OperationalAgent):
-    """Execution planning & sequencing."""
-    def __init__(self, model: str):
-        system_prompt = "You are the Planner. Your role is to plan the execution sequence of tasks."
-        super().__init__("Planner", "Execution planning & sequencing", model, system_prompt)
+        Online this can be delegated to the LLM; the heuristic below guarantees
+        a sensible tier offline and as a fast-path default.
+        """
+        text = task.lower()
+        score = 1
+        complex_signals = [
+            "architecture", "design", "security", "compliance", "migrate",
+            "end-to-end", "production", "scal", "multi", "strategy", "audit",
+            "comprehensive", "enterprise", "critical",
+        ]
+        score += sum(1 for s in complex_signals if s in text)
+        if len(task) > 400:
+            score += 1
+        if len(re.findall(r"[.!?]", task)) > 4:
+            score += 1
+        return max(1, min(4, score))
 
-class Clarifier(OperationalAgent):
-    """Question formulation for missing requirements."""
-    def __init__(self, model: str):
-        system_prompt = "You are the Clarifier. Your role is to identify and ask questions about missing requirements."
-        super().__init__("Clarifier", "Question formulation for missing requirements", model, system_prompt)
 
-class Researcher(OperationalAgent):
-    """Evidence gathering & web research."""
-    def __init__(self, model: str):
-        system_prompt = "You are the Researcher. Your role is to gather evidence and conduct web research."
-        super().__init__("Researcher", "Evidence gathering & web research", model, system_prompt)
+class TaskAnalyst(ClaudeAgent):
+    def __init__(self):
+        super().__init__(
+            name="Task Analyst",
+            description="Task decomposition & requirements analysis",
+            model=SONNET,
+            system_prompt=(
+                "You are the Task Analyst. Decompose the task into explicit "
+                "requirements, constraints, and success criteria."
+            ),
+        )
 
-class Executor(OperationalAgent):
-    """Solution generation with Tree of Thoughts."""
-    def __init__(self, model: str):
-        system_prompt = "You are the Executor. Your role is to generate solutions using the Tree of Thoughts method."
-        super().__init__("Executor", "Solution generation with Tree of Thoughts", model, system_prompt)
 
-class CodeReviewer(OperationalAgent):
-    """Security, performance, style review."""
-    def __init__(self, model: str):
-        system_prompt = "You are the Code Reviewer. Your role is to review code for security, performance, and style."
-        super().__init__("Code Reviewer", "Security, performance, style review", model, system_prompt)
+class Planner(ClaudeAgent):
+    def __init__(self):
+        super().__init__(
+            name="Planner",
+            description="Execution planning & sequencing",
+            model=SONNET,
+            system_prompt=(
+                "You are the Planner. Produce an ordered, actionable execution "
+                "plan with clear steps and dependencies."
+            ),
+        )
 
-class Formatter(OperationalAgent):
-    """Multi-format output generation."""
-    def __init__(self, model: str):
-        system_prompt = "You are the Formatter. Your role is to generate outputs in multiple formats."
-        super().__init__("Formatter", "Multi-format output generation", model, system_prompt)
 
-class Verifier(OperationalAgent):
-    """Hallucination detection & fact-checking."""
-    def __init__(self, model: str):
-        system_prompt = "You are the Verifier. Your role is to detect hallucinations and perform fact-checking."
-        super().__init__("Verifier", "Hallucination detection & fact-checking", model, system_prompt)
+class Clarifier(ClaudeAgent):
+    def __init__(self):
+        super().__init__(
+            name="Clarifier",
+            description="Question formulation for missing requirements",
+            model=SONNET,
+            system_prompt=(
+                "You are the Clarifier. Identify ambiguities and formulate the "
+                "minimal set of questions needed to proceed confidently."
+            ),
+        )
 
-class Critic(OperationalAgent):
-    """Adversarial attack (5 vectors)."""
-    def __init__(self, model: str):
-        system_prompt = "You are the Critic. Your role is to perform adversarial attacks using 5 vectors."
-        super().__init__("Critic", "Adversarial attack (5 vectors)", model, system_prompt)
 
-class Reviewer(OperationalAgent):
-    """Final quality gate."""
-    def __init__(self, model: str):
-        system_prompt = "You are the Reviewer. Your role is to act as the final quality gate."
-        super().__init__("Reviewer", "Final quality gate", model, system_prompt)
+class Researcher(ClaudeAgent):
+    def __init__(self):
+        super().__init__(
+            name="Researcher",
+            description="Evidence gathering & web research",
+            model=SONNET,
+            system_prompt=(
+                "You are the Researcher. Gather relevant evidence and cite "
+                "sources where possible."
+            ),
+        )
 
-class MemoryCurator(OperationalAgent):
-    """Knowledge extraction & persistence."""
-    def __init__(self, model: str):
-        system_prompt = "You are the Memory Curator. Your role is to extract and persist knowledge."
-        super().__init__("Memory Curator", "Knowledge extraction & persistence", model, system_prompt)
+
+class Executor(ClaudeAgent):
+    def __init__(self):
+        super().__init__(
+            name="Executor",
+            description="Solution generation with Tree of Thoughts",
+            model=SONNET,
+            max_tokens=2048,
+            system_prompt=(
+                "You are the Executor. Generate the solution using a Tree of "
+                "Thoughts: briefly explore alternative approaches, then commit "
+                "to and develop the strongest one."
+            ),
+        )
+
+
+class CodeReviewer(ClaudeAgent):
+    def __init__(self):
+        super().__init__(
+            name="Code Reviewer",
+            description="Security, performance, style review",
+            model=SONNET,
+            system_prompt=(
+                "You are the Code Reviewer. Review for security, performance, "
+                "and style issues, and suggest concrete fixes."
+            ),
+        )
+
+
+class Formatter(ClaudeAgent):
+    def __init__(self):
+        super().__init__(
+            name="Formatter",
+            description="Multi-format output generation",
+            model=SONNET,
+            system_prompt=(
+                "You are the Formatter. Render the final content cleanly in the "
+                "requested output format."
+            ),
+        )
+
+
+class Verifier(ClaudeAgent):
+    def __init__(self):
+        super().__init__(
+            name="Verifier",
+            description="Hallucination detection & fact-checking",
+            model=OPUS,
+            system_prompt=(
+                "You are the Verifier. Check the output for unsupported claims "
+                "and factual errors, and report a confidence assessment."
+            ),
+        )
+
+
+class Critic(ClaudeAgent):
+    """Adversarial reviewer attacking along five vectors."""
+
+    ATTACK_VECTORS = [
+        "Correctness",
+        "Completeness",
+        "Security",
+        "Edge cases",
+        "Clarity",
+    ]
+
+    def __init__(self):
+        super().__init__(
+            name="Critic",
+            description="Adversarial attack (5 vectors)",
+            model=OPUS,
+            system_prompt=(
+                "You are the Critic. Adversarially attack the output along five "
+                "vectors: correctness, completeness, security, edge cases, and "
+                "clarity. Be specific and ruthless."
+            ),
+        )
+
+    def attack(self, output: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+        """Run the critique across each attack vector and return findings."""
+        findings: Dict[str, str] = {}
+        for vector in self.ATTACK_VECTORS:
+            findings[vector] = self.run(
+                f"Attack this output on the '{vector}' vector and list weaknesses:\n{output}",
+                context=context,
+            )
+        return findings
+
+
+class Reviewer(ClaudeAgent):
+    def __init__(self):
+        super().__init__(
+            name="Reviewer",
+            description="Final quality gate",
+            model=OPUS,
+            system_prompt=(
+                "You are the Reviewer, the final quality gate. Decide whether "
+                "the output is ready to ship and summarise the verdict."
+            ),
+        )
+
+
+class MemoryCurator(ClaudeAgent):
+    def __init__(self):
+        super().__init__(
+            name="Memory Curator",
+            description="Knowledge extraction & persistence",
+            model=SONNET,
+            system_prompt=(
+                "You are the Memory Curator. Extract durable, reusable knowledge "
+                "from the task and its outcome for future reference."
+            ),
+        )

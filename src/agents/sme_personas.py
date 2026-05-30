@@ -1,42 +1,47 @@
-from typing import Any, Dict, List, Optional
+"""Dynamic SME persona agents, instantiated on demand."""
+from typing import Dict, List, Optional
+
 from core.claude_agent import ClaudeAgent
+from config.agent_config import SME_PERSONAS
+from config.models import SONNET
+
 
 class SMEPersona(ClaudeAgent):
-    """Dynamic SME Persona (On-demand domain expert)."""
-    def __init__(self, persona_name: str, domain: str, skills: List[str], model: str):
+    """A dynamically created domain expert."""
+
+    def __init__(self, name: str, domain: str, skills: List[str]):
+        super().__init__(
+            name=name,
+            description=f"SME in {domain}",
+            model=SONNET,
+            system_prompt=(
+                f"You are a Subject Matter Expert in {domain} with deep skills "
+                f"in {', '.join(skills)}. Provide expert, domain-specific guidance."
+            ),
+        )
         self.domain = domain
         self.skills = skills
-        system_prompt = (
-            f"You are a {persona_name}, an expert in the {domain} domain. "
-            f"Your skills include: {', '.join(skills)}."
-        )
-        super().__init__(persona_name, f"Expert in {domain}", model, system_prompt)
+
 
 class SMEPersonaManager:
-    """Manages on-demand instantiation of SME Personas."""
-    def __init__(self, persona_configs: Dict[str, Dict[str, Any]], default_model: str):
-        self.persona_configs = persona_configs
-        self.default_model = default_model
-        self._active_personas: Dict[str, SMEPersona] = {}
+    """Manages dynamic SME persona creation and caching."""
 
-    def get_persona(self, persona_name: str, model: Optional[str] = None) -> SMEPersona:
-        """Instantiates and returns an SME persona by name."""
-        if persona_name in self._active_personas:
-            return self._active_personas[persona_name]
+    def __init__(self):
+        self.personas: Dict[str, SMEPersona] = {}
 
-        config = self.persona_configs.get(persona_name)
-        if not config:
-            raise ValueError(f"Persona '{persona_name}' not found in configuration.")
+    def get_persona(self, name: str) -> Optional[SMEPersona]:
+        if name in self.personas:
+            return self.personas[name]
+        if name in SME_PERSONAS:
+            config = SME_PERSONAS[name]
+            persona = SMEPersona(name=name, domain=config["domain"], skills=config["skills"])
+            self.personas[name] = persona
+            return persona
+        return None
 
-        persona = SMEPersona(
-            persona_name=persona_name,
-            domain=config["domain"],
-            skills=config["skills"],
-            model=model or self.default_model
-        )
-        self._active_personas[persona_name] = persona
-        return persona
+    def list_available(self) -> List[str]:
+        return list(SME_PERSONAS.keys())
 
+    # Backwards-compatible alias
     def list_available_personas(self) -> List[str]:
-        """Lists all available persona names."""
-        return list(self.persona_configs.keys())
+        return self.list_available()
