@@ -1,13 +1,7 @@
 """High-level assembly of the Multi-Agent Council System."""
-from typing import Any, Callable, Dict, List, Optional
+from __future__ import annotations
 
-from agents import (
-    DomainCouncilChair,
-    EthicsSafetyAdvisor,
-    Orchestrator,
-    QualityArbiter,
-)
-from agents.sme_personas import SMEPersonaManager
+from typing import Any, Callable, Dict, List, Optional
 
 from .cost_tracker import CostTracker
 from .llm_client import LLMClient
@@ -24,6 +18,16 @@ class CouncilSystem:
         enforce_budget: bool = False,
         log: Optional[Callable[[str], None]] = None,
     ):
+        # Imported here (not at module top) to avoid a circular import with the
+        # agents package, which depends on ``core.claude_agent``.
+        from agents import (
+            DomainCouncilChair,
+            EthicsSafetyAdvisor,
+            Orchestrator,
+            QualityArbiter,
+        )
+        from agents.sme_personas import SMEPersonaManager
+
         cost_tracker = CostTracker(budget=budget, enforce=enforce_budget)
         Runtime.configure(client=LLMClient(), cost_tracker=cost_tracker)
 

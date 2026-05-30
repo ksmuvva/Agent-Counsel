@@ -10,7 +10,7 @@ from core import CouncilSystem, Runtime  # noqa: E402
 from core.cost_tracker import CostTracker, BudgetExceededError  # noqa: E402
 from core.llm_client import LLMClient  # noqa: E402
 from core.pipeline import VerdictMatrix, SelfPlayDebate  # noqa: E402
-from agents import Orchestrator, QualityArbiter, Reviewer  # noqa: E402
+from agents import Critic, Orchestrator, QualityArbiter, Reviewer, Verifier  # noqa: E402
 from agents.sme_personas import SMEPersonaManager  # noqa: E402
 
 
@@ -81,7 +81,7 @@ def test_verdict_matrix_threshold():
 
 def test_self_play_debate():
     Runtime.reset()
-    debate = SelfPlayDebate([QualityArbiter(), QualityArbiter()], QualityArbiter())
+    debate = SelfPlayDebate([Critic(), Verifier()], QualityArbiter())
     out = debate.conduct_debate("Is X better than Y?")
     assert "arguments" in out and "verdict" in out
     assert len(out["arguments"]) == 2

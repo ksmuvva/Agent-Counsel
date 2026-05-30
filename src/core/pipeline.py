@@ -1,20 +1,13 @@
-"""Phase execution pipeline and the key collaboration mechanisms."""
+"""Phase execution pipeline and the key collaboration mechanisms.
+
+Agent classes are imported lazily inside methods to avoid a circular import:
+``core`` imports this module during package init, while the agent modules import
+``core.claude_agent``.
+"""
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
-
-from agents import (
-    Critic,
-    DomainCouncilChair,
-    EthicsSafetyAdvisor,
-    Executor,
-    Orchestrator,
-    Planner,
-    QualityArbiter,
-    Reviewer,
-    TaskAnalyst,
-    Verifier,
-)
-from agents.sme_personas import SMEPersonaManager
 
 
 @dataclass
@@ -44,12 +37,23 @@ class PhaseExecutionPipeline:
 
     def __init__(
         self,
-        orchestrator: Orchestrator,
+        orchestrator: "Orchestrator",
         council: List[Any],
-        sme_manager: Optional[SMEPersonaManager] = None,
+        sme_manager: Optional["SMEPersonaManager"] = None,
         verdict_matrix: Optional["VerdictMatrix"] = None,
         log: Optional[Callable[[str], None]] = None,
     ):
+        from agents import (
+            Critic,
+            Executor,
+            Planner,
+            QualityArbiter,
+            Reviewer,
+            TaskAnalyst,
+            Verifier,
+        )
+        from agents.sme_personas import SMEPersonaManager
+
         self.orchestrator = orchestrator
         self.council = council
         self.sme_manager = sme_manager or SMEPersonaManager()
@@ -71,6 +75,8 @@ class PhaseExecutionPipeline:
         return cls()
 
     def run(self, task: str) -> PipelineResult:
+        from agents import DomainCouncilChair, EthicsSafetyAdvisor, QualityArbiter
+
         tier = self.orchestrator.classify_tier(task)
         self._log(f"Classified task as Tier {tier}")
         result = PipelineResult(task=task, tier=tier)
@@ -140,21 +146,19 @@ class PhaseExecutionPipeline:
 class SelfPlayDebate:
     """Multi-perspective reasoning resolved by a tiebreaker."""
 
-    def __init__(self, participants: List[Any], tiebreaker: QualityArbiter):
+    def __init__(self, participants: List[Any], tiebreaker: "QualityArbiter"):
         self.participants = participants
         self.tiebreaker = tiebreaker
 
     def conduct_debate(self, topic: str) -> Dict[str, Any]:
-        arguments = {
-            getattr(p, "name", str(p)): p.run(
-                f"Argue your perspective on: {topic}"
-            )
-            for p in self.participants
-        }
+        arguments: Dict[str, str] = {}
+        for index, participant in enumerate(self.participants):
+            label = getattr(participant, "name", str(participant))
+            if label in arguments:  # disambiguate duplicate participant names
+                label = f"{label} #{index + 1}"
+            arguments[label] = participant.run(f"Argue your perspective on: {topic}")
         joined = "\n\n".join(f"{name}: {arg}" for name, arg in arguments.items())
-        verdict = self.tiebreaker.run(
-            f"Review these arguments and decide:\n{joined}"
-        )
+        verdict = self.tiebreaker.run(f"Review these arguments and decide:\n{joined}")
         return {"arguments": arguments, "verdict": verdict}
 
 
@@ -170,8 +174,8 @@ class VerdictMatrix:
 
     def __init__(
         self,
-        quality_arbiter: QualityArbiter,
-        reviewer: Reviewer,
+        quality_arbiter: "QualityArbiter",
+        reviewer: "Reviewer",
         threshold: float = 0.6,
         criteria: Optional[Dict[str, float]] = None,
     ):
