@@ -1,50 +1,30 @@
-from core import (
-    ModelRouter, AgentFactory, ToolRegistry, CostTracker,
-    PhaseExecutionPipeline, SelfPlayDebate, VerdictMatrix
-)
-from config.agent_config import AGENT_ROLES
-from agents import (
-    DomainCouncilChair, QualityArbiter, EthicsSafetyAdvisor,
-    Orchestrator, TaskAnalyst, Planner, Clarifier, Researcher,
-    Executor, CodeReviewer, Formatter, Verifier, Critic, Reviewer, MemoryCurator,
-    SMEPersonaManager
-)
-from tools import DocumentTools, WebSearchTool
+"""Demo entry point for the Multi-Agent Council System."""
+import json
+
+from core import CouncilSystem
+
 
 def main():
-    # Initialize components
-    model_mapping = {}
-    for category in ["Strategic Council", "Operational Agents"]:
-        for role, config in AGENT_ROLES[category].items():
-            model_mapping[role] = config["model"]
+    print("Initializing Multi-Agent Council System...")
+    system = CouncilSystem(budget=20.0)
+    mode = "ONLINE (Claude API)" if system.online else "OFFLINE (simulation)"
+    print(f"Mode: {mode}\n")
 
-    router = ModelRouter(model_mapping)
-    factory = AgentFactory(router)
-    registry = ToolRegistry()
-    tracker = CostTracker()
+    task = "Develop a comprehensive market analysis report for a new SaaS product."
+    print(f"Executing task: {task}\n")
 
-    # Register tools
-    registry.register_tool("WebSearch", WebSearchTool.search)
-    registry.register_tool("ReadExcel", DocumentTools.read_excel)
-    registry.register_tool("WriteWord", DocumentTools.write_word)
+    result = system.run(task)
 
-    print(f"Tools registered: {registry.list_tools()}")
+    print(f"Tier: {result.tier}")
+    if result.selected_personas:
+        print(f"Selected SME personas: {', '.join(result.selected_personas)}")
+    print(f"Revised: {result.revised} | Passed quality gate: {result.passed}\n")
+    print("=== Final Verdict ===")
+    print(result.final_output)
 
-    # Create a Researcher agent and add the WebSearch tool
-    researcher_config = AGENT_ROLES["Operational Agents"]["Researcher"]
-    researcher = factory.create_agent(
-        "Researcher", 
-        "Researcher", 
-        researcher_config["description"]
-    )
-    researcher.add_tool(registry.get_tool("WebSearch"))
+    print("\n=== Cost Report ===")
+    print(json.dumps(system.cost_summary(), indent=2))
 
-    print(f"Created agent: {researcher}")
-    print(f"Agent tools: {researcher.tools}")
-
-    # Mock running the agent with a tool
-    response = researcher.run("Search for the latest trends in multi-agent systems.")
-    print(f"Researcher response: {response}")
 
 if __name__ == "__main__":
     main()

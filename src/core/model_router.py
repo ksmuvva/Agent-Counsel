@@ -1,13 +1,27 @@
-from typing import Dict, List
+"""Routes agents to the most appropriate model for their role/tier."""
+from typing import Dict
+
+from config.models import HAIKU, OPUS, SONNET
+
 
 class ModelRouter:
-    def __init__(self, model_mapping: Dict[str, str]):
-        self.model_mapping = model_mapping
+    """Assigns an LLM to each agent, optimising for performance vs. cost."""
 
-    def get_model(self, agent_role: str) -> str:
-        """Returns the appropriate model for a given agent role."""
-        return self.model_mapping.get(agent_role, "default_model") # Assuming a default model if not specified
+    def __init__(self, default_model: str = SONNET):
+        self.default_model = default_model
+        self.routing_table: Dict[str, str] = {}
 
-    def update_model_mapping(self, new_mapping: Dict[str, str]):
-        """Updates the model mapping."""
-        self.model_mapping.update(new_mapping)
+    def register(self, agent_name: str, model: str) -> None:
+        self.routing_table[agent_name] = model
+
+    def get_model(self, agent_name: str) -> str:
+        return self.routing_table.get(agent_name, self.default_model)
+
+    @staticmethod
+    def model_for_tier(tier: int) -> str:
+        """Pick a model tier from task complexity (1=simple ... 4=complex)."""
+        if tier >= 3:
+            return OPUS
+        if tier == 2:
+            return SONNET
+        return HAIKU

@@ -1,27 +1,78 @@
-from typing import Dict
+"""Cost tracking and budget enforcement based on real token usage."""
+from dataclasses import dataclass, field
+from typing import Dict, List
 
+from config.models import price_for
+
+
+class BudgetExceededError(RuntimeError):
+    """Raised when a recorded call would push spend past the budget."""
+
+
+@dataclass
+class UsageRecord:
+    agent: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+    cost: float
+
+
+@dataclass
 class CostTracker:
-    def __init__(self):
-        self.costs: Dict[str, float] = {}
-        self.total_cost: float = 0.0
+    """Monitors API usage and enforces a spend budget.
 
-    def record_cost(self, agent_name: str, cost: float):
-        """Records the cost incurred by a specific agent."""
-        self.costs[agent_name] = self.costs.get(agent_name, 0.0) + cost
+    Costs are computed from token counts and per-model pricing, so the figures
+    reflect real usage when running against the live API.
+    """
+
+    budget: float = 10.0
+    enforce: bool = False
+    total_cost: float = 0.0
+    records: List[UsageRecord] = field(default_factory=list)
+    per_agent: Dict[str, float] = field(default_factory=dict)
+
+    def record_usage(
+        self, agent_name: str, model: str, input_tokens: int, output_tokens: int
+    ) -> float:
+        price = price_for(model)
+        cost = (input_tokens / 1_000_000) * price["input"] + (
+            output_tokens / 1_000_000
+        ) * price["output"]
+
+        if self.enforce and self.total_cost + cost > self.budget:
+            raise BudgetExceededError(
+                f"Budget ${self.budget:.2f} would be exceeded "
+                f"(current ${self.total_cost:.4f} + ${cost:.4f})."
+            )
+
         self.total_cost += cost
+        self.per_agent[agent_name] = self.per_agent.get(agent_name, 0.0) + cost
+        self.records.append(
+            UsageRecord(agent_name, model, input_tokens, output_tokens, cost)
+        )
+        return cost
 
-    def get_agent_cost(self, agent_name: str) -> float:
-        """Returns the total cost for a specific agent."""
-        return self.costs.get(agent_name, 0.0)
+    @property
+    def remaining(self) -> float:
+        return max(0.0, self.budget - self.total_cost)
 
     def get_total_cost(self) -> float:
-        """Returns the total cost across all agents."""
         return self.total_cost
 
-    def reset(self):
-        """Resets all recorded costs."""
-        self.costs = {}
+    def reset(self) -> None:
         self.total_cost = 0.0
+        self.records.clear()
+        self.per_agent.clear()
 
-    def __str__(self):
-        return f"Total Cost: ${self.total_cost:.4f}, Agent Costs: {self.costs}"
+    def get_report(self) -> Dict[str, float]:
+        return dict(self.per_agent)
+
+    def summary(self) -> Dict[str, object]:
+        return {
+            "total_cost": round(self.total_cost, 6),
+            "budget": self.budget,
+            "remaining": round(self.remaining, 6),
+            "calls": len(self.records),
+            "per_agent": {k: round(v, 6) for k, v in self.per_agent.items()},
+        }
