@@ -27,8 +27,6 @@ class MissingDependencyError(RuntimeError):
 class DocumentTools:
     """Read and write common office document formats."""
 
-    name = "document_tools"
-
     # ---- Excel ---------------------------------------------------------
     @staticmethod
     def read_excel(path: str) -> Dict[str, List[List[Any]]]:

@@ -63,7 +63,7 @@ Agent-Counsel is a sophisticated multi-agent system designed to tackle complex t
 ### Prerequisites
 
 - Python 3.10 or higher
-- API key for your chosen LLM provider (Anthropic, OpenAI, Google, etc.)
+- `ANTHROPIC_API_KEY` exported in your environment (the system is real-only — see DESIGN.md §2.1)
 
 ### Installation
 
@@ -86,11 +86,11 @@ Agent-Counsel is a sophisticated multi-agent system designed to tackle complex t
     *(Note: `requirements.txt` will be generated in the next step)*
 
 4.  **Set up your API key:**
-    Create a `.env` file in the root directory and add your LLM API key:
+    Create a `.env` file in the root directory and add:
     ```
     ANTHROPIC_API_KEY="your_anthropic_api_key"
-    # Or for OpenAI:
-    # OPENAI_API_KEY="your_openai_api_key"
+    # Optional, for the web_search tool:
+    # TAVILY_API_KEY="your_tavily_api_key"
     ```
 
 ### Running the CLI
@@ -120,22 +120,32 @@ Agent-Counsel/
 │   ├── cli/
 │   │   └── cli.py
 │   ├── config/
-│   │   └── agent_config.py
+│   │   ├── agent_config.py
+│   │   └── models.py
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── agent_factory.py
 │   │   ├── base_agent.py
 │   │   ├── claude_agent.py
 │   │   ├── cost_tracker.py
+│   │   ├── llm_client.py
 │   │   ├── model_router.py
 │   │   ├── pipeline.py
+│   │   ├── runtime.py
+│   │   ├── system.py
 │   │   └── tool_registry.py
 │   ├── tools/
 │   │   ├── __init__.py
-│   │   └── document_tools.py
+│   │   ├── base.py
+│   │   ├── diagram_tools.py
+│   │   ├── document_tools.py
+│   │   └── reasoning_tools.py
 │   ├── ui/
 │   │   └── streamlit_app.py
 │   └── main.py
+├── tests/
+│   ├── test_system.py
+│   └── test_tools.py
 ├── DESIGN.md
 ├── README.md
 └── requirements.txt
@@ -151,8 +161,9 @@ Agent-Counsel/
 
 ### Adding New Tools
 
-1.  Create a new tool class or static methods in `src/tools/`.
-2.  Register the tool with the `ToolRegistry` in your agent's `__init__` method or during system initialization.
+1.  Subclass `tools.Tool` in `src/tools/`, set `name`, `description`, and a JSON `input_schema`, then implement `execute(**kwargs)`.
+2.  Register an instance in `tools.default_registry()` (or call `runtime.tools.register_tool(MyTool())` at runtime). The same `Tool` declaration drives schema validation, local dispatch, and the Anthropic tool-use spec.
+3.  To let an agent actually call the tool, attach it: `agent.add_tool(runtime.tools.get_tool("my_tool"))`. `ClaudeAgent.run()` will drive the tool-use loop automatically.
 
 ## License
 

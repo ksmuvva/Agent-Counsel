@@ -1,13 +1,11 @@
 """Central registry of callable tools.
 
-Stores :class:`tools.base.Tool` instances keyed by name and exposes helpers
-for invoking them or handing their specs to the Claude tool-use API. Legacy
-plain-object tools (no schema) are still accepted for backwards compatibility
-but are not surfaced to Claude.
+Stores :class:`tools.base.Tool` instances keyed by ``tool.name`` and exposes
+helpers for invoking them or handing their specs to the Claude tool-use API.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 
 class ToolRegistry:
@@ -15,20 +13,11 @@ class ToolRegistry:
         self._tools: Dict[str, Any] = {}
 
     # ---- registration --------------------------------------------------
-    def register_tool(self, name_or_tool, tool: Optional[Any] = None) -> None:
-        """Register a tool.
-
-        Two call styles are supported:
-        - ``register_tool(tool_instance)`` — name is read from ``tool.name``.
-        - ``register_tool("explicit_name", tool_instance)`` — legacy form.
-        """
-        if tool is None:
-            tool = name_or_tool
-            name = getattr(tool, "name", None)
-            if not name:
-                raise ValueError("Tool instance must define a non-empty 'name'.")
-        else:
-            name = name_or_tool
+    def register_tool(self, tool: Any) -> None:
+        """Register a :class:`~tools.base.Tool` instance under ``tool.name``."""
+        name = getattr(tool, "name", None)
+        if not name:
+            raise ValueError("Tool instance must define a non-empty 'name'.")
         if name in self._tools:
             raise ValueError(f"Tool with name '{name}' already registered.")
         self._tools[name] = tool
@@ -58,7 +47,7 @@ class ToolRegistry:
 
     # ---- Claude tool-use integration -----------------------------------
     def anthropic_tool_specs(self) -> List[Dict[str, Any]]:
-        """Return the subset of registered tools as Anthropic tool specs."""
+        """Return the registered tools as Anthropic tool specs."""
         specs: List[Dict[str, Any]] = []
         for tool in self._tools.values():
             as_spec = getattr(tool, "as_anthropic_tool", None)

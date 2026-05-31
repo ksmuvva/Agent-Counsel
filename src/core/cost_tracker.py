@@ -57,16 +57,10 @@ class CostTracker:
     def remaining(self) -> float:
         return max(0.0, self.budget - self.total_cost)
 
-    def get_total_cost(self) -> float:
-        return self.total_cost
-
     def reset(self) -> None:
         self.total_cost = 0.0
         self.records.clear()
         self.per_agent.clear()
-
-    def get_report(self) -> Dict[str, float]:
-        return dict(self.per_agent)
 
     def summary(self) -> Dict[str, object]:
         return {

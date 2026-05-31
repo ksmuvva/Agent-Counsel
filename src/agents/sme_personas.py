@@ -41,7 +41,3 @@ class SMEPersonaManager:
 
     def list_available(self) -> List[str]:
         return list(SME_PERSONAS.keys())
-
-    # Backwards-compatible alias
-    def list_available_personas(self) -> List[str]:
-        return self.list_available()

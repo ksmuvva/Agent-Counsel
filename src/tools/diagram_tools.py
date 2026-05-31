@@ -66,7 +66,7 @@ def _validate_plantuml(source: str) -> None:
         raise ToolError("PlantUML source must contain both @startuml and @enduml.")
 
 
-def _complete(system: str, prompt: str, *, max_tokens: int = 1200) -> str:
+def _complete(tool_name: str, system: str, prompt: str, *, max_tokens: int = 1200) -> str:
     from core.runtime import Runtime
 
     runtime = Runtime.get()
@@ -78,7 +78,10 @@ def _complete(system: str, prompt: str, *, max_tokens: int = 1200) -> str:
         temperature=0.3,
     )
     runtime.cost_tracker.record_usage(
-        "tool:diagram", "claude-sonnet-4-5", response.input_tokens, response.output_tokens
+        f"tool:{tool_name}",
+        "claude-sonnet-4-5",
+        response.input_tokens,
+        response.output_tokens,
     )
     return response.text
 
@@ -114,7 +117,7 @@ class MermaidHLDTool(Tool):
             "and the data/control flow between them. Reply with the Mermaid "
             "source only — no prose, no code fences."
         )
-        source = _strip_fence(_complete(system, f"## System\n{description}"))
+        source = _strip_fence(_complete(self.name, system, f"## System\n{description}"))
         try:
             _validate_mermaid(source)
         except ToolError:
@@ -151,7 +154,7 @@ class MermaidLLDTool(Tool):
             "fields or transitions. Reply with the Mermaid source only — no "
             "prose, no code fences."
         )
-        source = _strip_fence(_complete(system, f"## Detail\n{description}"))
+        source = _strip_fence(_complete(self.name, system, f"## Detail\n{description}"))
         if not source.lower().startswith(diagram_type.lower()):
             source = f"{diagram_type}\n{source}"
         _validate_mermaid(source)
@@ -184,7 +187,7 @@ class PlantUMLLLDTool(Tool):
             f"PlantUML {diagram_type} diagram. Reply with PlantUML source only, "
             "wrapped in @startuml/@enduml. No prose, no code fences."
         )
-        source = _strip_fence(_complete(system, f"## Detail\n{description}"))
+        source = _strip_fence(_complete(self.name, system, f"## Detail\n{description}"))
         if "@startuml" not in source:
             source = f"@startuml\n{source}\n@enduml"
         _validate_plantuml(source)

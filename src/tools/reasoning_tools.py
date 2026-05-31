@@ -12,8 +12,15 @@ from typing import Any, Dict, List
 from .base import Tool
 
 
-def _complete(system: str, prompt: str, *, max_tokens: int = 1024, temperature: float = 0.4) -> str:
-    """Run a completion via the shared runtime client."""
+def _complete(
+    tool_name: str,
+    system: str,
+    prompt: str,
+    *,
+    max_tokens: int = 1024,
+    temperature: float = 0.4,
+) -> str:
+    """Run a completion via the shared runtime client and bill it to ``tool_name``."""
     # Imported lazily to keep the tools package free of core dependencies at import time.
     from core.runtime import Runtime
 
@@ -26,7 +33,10 @@ def _complete(system: str, prompt: str, *, max_tokens: int = 1024, temperature: 
         temperature=temperature,
     )
     runtime.cost_tracker.record_usage(
-        f"tool:{system[:24]}", "claude-sonnet-4-5", response.input_tokens, response.output_tokens
+        f"tool:{tool_name}",
+        "claude-sonnet-4-5",
+        response.input_tokens,
+        response.output_tokens,
     )
     return response.text
 
@@ -55,7 +65,7 @@ class ChainOfThoughtTool(Tool):
         prompt = f"## Problem\n{problem}"
         if context:
             prompt += f"\n\n## Context\n{context}"
-        return _complete(system, prompt)
+        return _complete(self.name, system, prompt)
 
 
 class TreeOfThoughtsTool(Tool):
@@ -81,7 +91,9 @@ class TreeOfThoughtsTool(Tool):
             "rationale, a numeric score from 0-10, and a one-line outcome. End "
             "with a line 'Recommended: <approach number>'."
         )
-        text = _complete(system, f"## Problem\n{problem}", max_tokens=1500, temperature=0.6)
+        text = _complete(
+            self.name, system, f"## Problem\n{problem}", max_tokens=1500, temperature=0.6
+        )
         return {"branches": branches, "analysis": text}
 
 
@@ -110,6 +122,7 @@ class ClaimVerifierTool(Tool):
             "Reason: <one sentence>"
         )
         text = _complete(
+            self.name,
             system,
             f"## Claim\n{claim}\n\n## Evidence\n{evidence}",
             max_tokens=400,
@@ -146,7 +159,9 @@ class TaskDecomposerTool(Tool):
             "<index>. <title> | depends_on=<comma-separated indices or none> | "
             "outcome=<one short sentence>"
         )
-        text = _complete(system, f"## Task\n{task}", max_tokens=900, temperature=0.3)
+        text = _complete(
+            self.name, system, f"## Task\n{task}", max_tokens=900, temperature=0.3
+        )
         steps: List[Dict[str, str]] = []
         for line in text.splitlines():
             line = line.strip()
