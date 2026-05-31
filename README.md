@@ -2,19 +2,18 @@
 
 ## Overview
 
-Agent-Counsel is a sophisticated multi-agent system designed to tackle complex tasks through collaborative AI agents. It leverages the Claude Code Agent SDK and features a council of permanent agents, dynamic SME personas, a structured phase execution pipeline, and dual user interfaces (CLI and Streamlit).
+Agent-Counsel is a multi-agent system that tackles complex tasks through collaborative AI agents. It is built on the **Claude Agent SDK**: every agent is a real, tool-using ReAct agent, not a scripted mock. It features a council of permanent agents, dynamic SME personas, a structured phase execution pipeline, and dual user interfaces (CLI and Streamlit).
 
 ## Features
 
-- **15 Permanent Agents**: Comprising 3 Strategic Council agents and 12 Operational agents, each with predefined roles and assigned LLM models (Claude Opus or Sonnet).
-- **10+ Dynamic SME Personas**: On-demand domain experts that can be instantiated as needed for specialized tasks.
-- **Phase Execution Pipeline**: A structured workflow that guides task execution, incorporating Council consultation at critical junctures.
-- **Self-Play Debate**: A mechanism for multi-perspective reasoning, including a tiebreaker function to resolve disagreements.
-- **Verdict Matrix**: A quality gate that evaluates outputs and can trigger automatic revisions.
-- **5 Ensemble Patterns**: Pre-configured collaboration strategies for agents to work together effectively.
-- **Multi-Modal I/O**: Support for processing and generating text, images, documents (Excel, Word, PowerPoint), and code files.
-- **Cost Tracking**: Real-time monitoring and enforcement of budget constraints for LLM API usage.
-- **Dual UI**: A command-line interface (CLI) built with Typer for automation and a rich web interface built with Streamlit for interactive control and visualization.
+- **Real tool-using agents**: Each agent runs a genuine ReAct loop via the Claude Agent SDK — it reasons, calls the tools it has been granted, observes the results, and iterates. Each agent is sandboxed to only its own tools.
+- **15 Permanent Agents**: 3 Strategic Council agents and 12 Operational agents, each with a defined role and model (Opus or Sonnet).
+- **10 Dynamic SME Personas**: On-demand domain experts, engaged automatically when the Council selects them for a task.
+- **Phase Execution Pipeline**: A real async workflow — tier classification → analysis → Council consultation (Tier 3-4) → SME input → planning → execution → adversarial critique + verification → final verdict — where each phase is an actual agent run.
+- **Adversarial review & verdict gate**: A Critic attacks the output along five vectors, a Verifier fact-checks it, and a Reviewer issues a PASS/FAIL verdict parsed from its own output.
+- **Real document & web tools**: Genuine Excel/Word/PowerPoint read/write (`openpyxl`, `python-docx`, `python-pptx`) and web search (Tavily), executed in-process and fed back into the agent's reasoning.
+- **Real cost tracking**: Per-agent USD cost and turn counts taken directly from the SDK's reported usage — actual billed amounts, with optional budget enforcement.
+- **Dual UI**: A Typer CLI for automation and a Streamlit web app for interactive use.
 
 ## Agent Roster
 
@@ -63,7 +62,9 @@ Agent-Counsel is a sophisticated multi-agent system designed to tackle complex t
 ### Prerequisites
 
 - Python 3.10 or higher
-- API key for your chosen LLM provider (Anthropic, OpenAI, Google, etc.)
+- A working **Claude Agent SDK** environment — either an authenticated `claude`
+  CLI on your `PATH`, or an `ANTHROPIC_API_KEY`. The agents are real: each run
+  drives the model through the SDK and the model decides when to call tools.
 
 ### Installation
 
@@ -83,21 +84,35 @@ Agent-Counsel is a sophisticated multi-agent system designed to tackle complex t
     ```bash
     pip install -r requirements.txt
     ```
-    *(Note: `requirements.txt` will be generated in the next step)*
 
-4.  **Set up your API key:**
-    Create a `.env` file in the root directory and add your LLM API key:
+4.  **Authenticate** (one of):
+    ```bash
+    # Option A — use the Claude CLI (the SDK spawns it):
+    npm install -g @anthropic-ai/claude-code && claude login
+
+    # Option B — use an API key:
+    export ANTHROPIC_API_KEY="sk-ant-..."
+
+    # Optional — enable the Researcher's real web_search tool:
+    export TAVILY_API_KEY="tvly-..."
     ```
-    ANTHROPIC_API_KEY="your_anthropic_api_key"
-    # Or for OpenAI:
-    # OPENAI_API_KEY="your_openai_api_key"
-    ```
+
+### How it works (real agents, real tools)
+
+Every agent is a genuine ReAct loop run via the Claude Agent SDK: the model
+reasons, may call the in-process Python tools it has been granted (real
+Excel/Word/PowerPoint I/O and web search), observes the results, and iterates
+to a final answer. Each agent is sandboxed to **only** its own tools, and
+costs/turns reported in the cost summary come straight from the SDK — they are
+actual billed amounts, not estimates. There is no mock or simulation path.
 
 ### Running the CLI
 
 ```bash
 export PYTHONPATH=$PYTHONPATH:$(pwd)/src
-python src/cli/cli.py --help
+python src/cli/cli.py run "Write a one-page market analysis for an AI SaaS product"
+python src/cli/cli.py list-agents
+python src/cli/cli.py list-personas
 ```
 
 ### Running the Streamlit App
@@ -107,6 +122,16 @@ export PYTHONPATH=$PYTHONPATH:$(pwd)/src
 streamlit run src/ui/streamlit_app.py
 ```
 
+### Running the Tests
+
+```bash
+pytest
+```
+
+Pure-logic tests (parsers, cost math, tool wiring) run anywhere. The end-to-end
+test makes a real SDK call and is skipped automatically if no SDK environment
+is detected.
+
 ## Project Structure
 
 ```
@@ -114,28 +139,29 @@ Agent-Counsel/
 ├── src/
 │   ├── agents/
 │   │   ├── __init__.py
-│   │   ├── operational_agents.py
-│   │   ├── sme_personas.py
-│   │   └── strategic_council.py
+│   │   ├── operational_agents.py   # 12 operational agent factories
+│   │   ├── sme_personas.py         # dynamic SME persona manager
+│   │   └── strategic_council.py    # 3 council agent factories
 │   ├── cli/
-│   │   └── cli.py
+│   │   └── cli.py                  # Typer CLI (async run / list-agents / list-personas)
 │   ├── config/
-│   │   └── agent_config.py
+│   │   ├── agent_config.py         # agent + persona roster
+│   │   └── models.py               # model aliases (env-overridable)
 │   ├── core/
 │   │   ├── __init__.py
-│   │   ├── agent_factory.py
-│   │   ├── base_agent.py
-│   │   ├── claude_agent.py
-│   │   ├── cost_tracker.py
-│   │   ├── model_router.py
-│   │   ├── pipeline.py
-│   │   └── tool_registry.py
+│   │   ├── base_agent.py           # Agent: a real SDK-backed ReAct agent
+│   │   ├── sdk_runner.py           # invoke_agent: the real execution engine
+│   │   ├── cost_tracker.py         # cost/turns from real SDK ResultMessage
+│   │   ├── pipeline.py             # real async multi-agent orchestration
+│   │   └── system.py               # CouncilSystem assembly
 │   ├── tools/
 │   │   ├── __init__.py
-│   │   └── document_tools.py
+│   │   └── document_tools.py       # real @tool functions + SDK MCP server
 │   ├── ui/
 │   │   └── streamlit_app.py
 │   └── main.py
+├── tests/
+│   └── test_system.py              # logic tests + a real end-to-end SDK test
 ├── DESIGN.md
 ├── README.md
 └── requirements.txt
@@ -145,14 +171,17 @@ Agent-Counsel/
 
 ### Adding New Agents
 
-1.  Create a new agent class inheriting from `BaseAgent` (or `StrategicCouncilAgent`/`OperationalAgent`/`SMEPersona`).
-2.  Add the agent's configuration to `src/config/agent_config.py`.
-3.  Update `src/agents/__init__.py` to export the new agent.
+1.  Add a factory function in the relevant module under `src/agents/` that
+    returns an `Agent` (see `core/base_agent.py`), giving it a `system_prompt`
+    and the `allowed_tools` it may call.
+2.  Export it from `src/agents/__init__.py` and wire it into the pipeline.
 
 ### Adding New Tools
 
-1.  Create a new tool class or static methods in `src/tools/`.
-2.  Register the tool with the `ToolRegistry` in your agent's `__init__` method or during system initialization.
+1.  Define a real `@tool` function in `src/tools/document_tools.py` and add it
+    to `ALL_TOOLS` (it is then served by `build_tool_server`).
+2.  Add its fully-qualified name (`mcp__council_tools__<name>`) to the
+    `allowed_tools` of any agent that should be able to call it.
 
 ## License
 

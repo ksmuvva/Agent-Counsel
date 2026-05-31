@@ -131,7 +131,9 @@ Implemented in `src/core/pipeline.py`, these components provide sophisticated co
 - **Phase Execution Pipeline**: Defines a structured workflow for task execution, incorporating various phases and agent consultations.
 - **Self-Play Debate**: Facilitates multi-perspective reasoning among agents, with a `QualityArbiter` acting as a tiebreaker.
 - **Verdict Matrix**: Acts as a quality gate, evaluating agent outputs against predefined standards and triggering revisions if necessary.
-- **Ensemble Patterns**: Placeholder for pre-configured agent collaboration strategies.
+- **Phase pipeline**: real async orchestration in `src/core/pipeline.py`, where
+  each phase is an actual agent run and control signals (tier, selected
+  personas, PASS/FAIL verdict) are parsed from the agents' own output.
 
 ## 7. User Interfaces
 
@@ -149,22 +151,30 @@ Implemented in `src/ui/streamlit_app.py`, offering an interactive web-based cont
 
 ## 8. Tool Integration
 
-Implemented in `src/tools/document_tools.py`, providing agents with external capabilities:
-- **DocumentTools**: Mock implementations for interacting with Excel, Word, and PowerPoint files.
-- **WebSearchTool**: Mock implementation for conducting web searches.
+Implemented in `src/tools/document_tools.py` as real in-process `@tool`
+functions, exposed to the agents through an SDK MCP server
+(`build_tool_server`). When an agent decides to call one, the SDK executes the
+Python code and feeds the result back into the model's reasoning loop:
+- **Document tools**: real Excel (`openpyxl`), Word (`python-docx`), and
+  PowerPoint (`python-pptx`) read/write.
+- **web_search**: real web search via the Tavily API (errors clearly if
+  `TAVILY_API_KEY` is unset, rather than returning fabricated results).
 
-## 9. Development Environment Setup
+Each agent is sandboxed via `ClaudeAgentOptions(tools=...)` so it can only call
+the tools it has been granted — not the host CLI's built-ins.
+
+## 9. Execution Engine
+
+`src/core/sdk_runner.py` is the real engine. `invoke_agent` runs one agent to
+completion via `claude_agent_sdk.query`, returning an `AgentResult` with the
+final text, the tools actually invoked, the real `total_cost_usd`, and the
+turn count — all sourced directly from the SDK's `ResultMessage`. There is no
+mock or offline simulation path.
+
+## 10. Development Environment Setup
 
 - **Python 3.10+**
-- **Claude Code Agent SDK**
-- **Streamlit**
-- **Typer**
-- **LLM API Keys** (Anthropic, OpenAI, Google, etc.)
-
-## 10. Next Steps
-
-1.  Thoroughly test the entire system, including agent interactions, pipeline execution, and UI functionalities.
-2.  Refine mock implementations of tools with actual integrations (e.g., real web search, document parsing libraries).
-3.  Implement the 5 Ensemble Patterns for agent collaborations.
-4.  Commit all developed code and documentation to the GitHub repository.
-5.  Deliver the final project and documentation to the user.
+- **claude-agent-sdk** (drives the agent loop and tool calling)
+- An authenticated `claude` CLI **or** `ANTHROPIC_API_KEY`
+- **Streamlit**, **Typer**
+- Optional: `TAVILY_API_KEY` for the web_search tool

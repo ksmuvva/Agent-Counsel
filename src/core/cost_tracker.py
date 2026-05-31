@@ -1,78 +1,50 @@
-"""Cost tracking and budget enforcement based on real token usage."""
+"""Cost tracking from real SDK-reported usage.
+
+Costs come straight from the SDK's ``ResultMessage.total_cost_usd`` for each
+agent run — they are actual billed amounts, not estimates from a price table.
+"""
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Dict, List
 
-from config.models import price_for
+from .sdk_runner import AgentResult
 
 
 class BudgetExceededError(RuntimeError):
-    """Raised when a recorded call would push spend past the budget."""
-
-
-@dataclass
-class UsageRecord:
-    agent: str
-    model: str
-    input_tokens: int
-    output_tokens: int
-    cost: float
+    """Raised when recorded spend passes the configured budget."""
 
 
 @dataclass
 class CostTracker:
-    """Monitors API usage and enforces a spend budget.
-
-    Costs are computed from token counts and per-model pricing, so the figures
-    reflect real usage when running against the live API.
-    """
-
-    budget: float = 10.0
+    budget: float = 20.0
     enforce: bool = False
     total_cost: float = 0.0
-    records: List[UsageRecord] = field(default_factory=list)
+    total_turns: int = 0
     per_agent: Dict[str, float] = field(default_factory=dict)
+    tools_used: List[str] = field(default_factory=list)
 
-    def record_usage(
-        self, agent_name: str, model: str, input_tokens: int, output_tokens: int
-    ) -> float:
-        price = price_for(model)
-        cost = (input_tokens / 1_000_000) * price["input"] + (
-            output_tokens / 1_000_000
-        ) * price["output"]
-
-        if self.enforce and self.total_cost + cost > self.budget:
+    def record(self, agent_name: str, result: AgentResult) -> float:
+        self.total_cost += result.cost_usd
+        self.total_turns += result.num_turns
+        self.per_agent[agent_name] = self.per_agent.get(agent_name, 0.0) + result.cost_usd
+        self.tools_used.extend(result.tools_used)
+        if self.enforce and self.total_cost > self.budget:
             raise BudgetExceededError(
-                f"Budget ${self.budget:.2f} would be exceeded "
-                f"(current ${self.total_cost:.4f} + ${cost:.4f})."
+                f"Budget ${self.budget:.2f} exceeded (spent ${self.total_cost:.4f})."
             )
-
-        self.total_cost += cost
-        self.per_agent[agent_name] = self.per_agent.get(agent_name, 0.0) + cost
-        self.records.append(
-            UsageRecord(agent_name, model, input_tokens, output_tokens, cost)
-        )
-        return cost
+        return result.cost_usd
 
     @property
     def remaining(self) -> float:
         return max(0.0, self.budget - self.total_cost)
 
-    def get_total_cost(self) -> float:
-        return self.total_cost
-
-    def reset(self) -> None:
-        self.total_cost = 0.0
-        self.records.clear()
-        self.per_agent.clear()
-
-    def get_report(self) -> Dict[str, float]:
-        return dict(self.per_agent)
-
     def summary(self) -> Dict[str, object]:
         return {
-            "total_cost": round(self.total_cost, 6),
+            "total_cost_usd": round(self.total_cost, 6),
             "budget": self.budget,
             "remaining": round(self.remaining, 6),
-            "calls": len(self.records),
+            "total_turns": self.total_turns,
+            "tools_invoked": self.tools_used,
             "per_agent": {k: round(v, 6) for k, v in self.per_agent.items()},
         }

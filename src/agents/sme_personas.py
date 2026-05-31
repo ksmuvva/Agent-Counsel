@@ -1,47 +1,43 @@
 """Dynamic SME persona agents, instantiated on demand."""
+from __future__ import annotations
+
 from typing import Dict, List, Optional
 
-from core.claude_agent import ClaudeAgent
+from core.base_agent import Agent
 from config.agent_config import SME_PERSONAS
 from config.models import SONNET
+from tools.document_tools import WEB_SEARCH_TOOL_NAME
 
 
-class SMEPersona(ClaudeAgent):
-    """A dynamically created domain expert."""
-
-    def __init__(self, name: str, domain: str, skills: List[str]):
-        super().__init__(
-            name=name,
-            description=f"SME in {domain}",
-            model=SONNET,
-            system_prompt=(
-                f"You are a Subject Matter Expert in {domain} with deep skills "
-                f"in {', '.join(skills)}. Provide expert, domain-specific guidance."
-            ),
-        )
-        self.domain = domain
-        self.skills = skills
+def make_persona(name: str, domain: str, skills: List[str]) -> Agent:
+    return Agent(
+        name=name,
+        description=f"SME in {domain}",
+        model=SONNET,
+        system_prompt=(
+            f"You are a Subject Matter Expert in {domain} with deep skills in "
+            f"{', '.join(skills)}. Provide expert, domain-specific guidance. Use "
+            f"web_search if you need current external facts."
+        ),
+        allowed_tools=[WEB_SEARCH_TOOL_NAME],
+    )
 
 
 class SMEPersonaManager:
-    """Manages dynamic SME persona creation and caching."""
+    """Creates and caches dynamic SME persona agents."""
 
-    def __init__(self):
-        self.personas: Dict[str, SMEPersona] = {}
+    def __init__(self) -> None:
+        self._cache: Dict[str, Agent] = {}
 
-    def get_persona(self, name: str) -> Optional[SMEPersona]:
-        if name in self.personas:
-            return self.personas[name]
-        if name in SME_PERSONAS:
-            config = SME_PERSONAS[name]
-            persona = SMEPersona(name=name, domain=config["domain"], skills=config["skills"])
-            self.personas[name] = persona
-            return persona
-        return None
+    def get_persona(self, name: str) -> Optional[Agent]:
+        if name in self._cache:
+            return self._cache[name]
+        cfg = SME_PERSONAS.get(name)
+        if cfg is None:
+            return None
+        agent = make_persona(name, cfg["domain"], cfg["skills"])
+        self._cache[name] = agent
+        return agent
 
     def list_available(self) -> List[str]:
         return list(SME_PERSONAS.keys())
-
-    # Backwards-compatible alias
-    def list_available_personas(self) -> List[str]:
-        return self.list_available()
