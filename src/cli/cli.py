@@ -1,4 +1,5 @@
 """Command-line interface for the Multi-Agent Council System."""
+import asyncio
 import json
 
 import typer
@@ -17,28 +18,33 @@ def run(
     enforce: bool = typer.Option(False, help="Abort if the budget is exceeded."),
     json_output: bool = typer.Option(False, "--json", help="Emit the full result as JSON."),
 ):
-    """Run a task through the full phase execution pipeline."""
-    system = CouncilSystem(budget=budget, enforce_budget=enforce, log=lambda m: typer.echo(f"  • {m}"))
-    result = system.run(task)
+    """Run a task through the full phase execution pipeline (real agents)."""
 
-    if json_output:
-        typer.echo(json.dumps(result.as_dict(), indent=2))
-    else:
-        typer.echo(f"\nTier: {result.tier} | Revised: {result.revised} | Passed: {result.passed}")
-        if result.selected_personas:
-            typer.echo(f"SME personas: {', '.join(result.selected_personas)}")
-        typer.echo("\n=== Final Verdict ===")
-        typer.echo(result.final_output)
-    typer.echo("\n=== Cost ===")
-    typer.echo(json.dumps(system.cost_summary(), indent=2))
+    async def _go():
+        system = CouncilSystem(
+            budget=budget, enforce_budget=enforce, log=lambda m: typer.echo(f"  • {m}")
+        )
+        result = await system.run(task)
+        if json_output:
+            typer.echo(json.dumps(result.as_dict(), indent=2))
+        else:
+            typer.echo(f"\nTier: {result.tier} | Passed: {result.passed}")
+            if result.selected_personas:
+                typer.echo(f"SME personas: {', '.join(result.selected_personas)}")
+            typer.echo("\n=== Final Verdict ===")
+            typer.echo(result.final_output)
+        typer.echo("\n=== Cost (real, from SDK) ===")
+        typer.echo(json.dumps(system.cost_summary(), indent=2))
+
+    asyncio.run(_go())
 
 
 @app.command("list-agents")
 def list_agents():
     """List all permanent agents and their assigned models."""
-    for group, agents in AGENT_ROLES.items():
+    for group, members in AGENT_ROLES.items():
         typer.echo(f"\n{group}:")
-        for name, cfg in agents.items():
+        for name, cfg in members.items():
             typer.echo(f"  - {name} [{cfg['model']}] — {cfg['description']}")
 
 
@@ -52,7 +58,7 @@ def list_personas():
 @app.command()
 def version():
     """Show the version."""
-    typer.echo("Agent-Counsel 0.1.0")
+    typer.echo("Agent-Counsel 0.2.0")
 
 
 if __name__ == "__main__":

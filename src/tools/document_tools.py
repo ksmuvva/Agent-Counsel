@@ -1,286 +1,170 @@
-"""Document I/O tools (Excel, Word, PowerPoint).
+"""Real, in-process tools exposed to the agents via the Claude Agent SDK.
 
-Real implementations backed by openpyxl / python-docx / python-pptx. Each
-method raises :class:`MissingDependencyError` with an actionable message when
-the optional library is not installed, rather than silently faking data.
-
-Two surfaces are provided:
-
-* :class:`DocumentTools` — a thin static-method helper for direct Python use.
-* Per-format :class:`~tools.base.Tool` subclasses (e.g. ``ExcelReadTool``)
-  that agents can invoke through the schema-based ``ToolRegistry``.
+These are genuine `@tool` functions: when an agent decides to call one, the SDK
+executes this Python code and feeds the result back into the model's reasoning
+loop. The document tools perform real file I/O via openpyxl / python-docx /
+python-pptx. ``build_tool_server`` packages them as an in-process MCP server.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import os
+from typing import Any, Dict
 
-from .base import Tool, ToolError
-
-
-class MissingDependencyError(RuntimeError):
-    """Raised when an optional document library is not installed."""
+from claude_agent_sdk import create_sdk_mcp_server, tool
 
 
-# ---------------------------------------------------------------------------
-# Static helper (kept for direct Python use and backwards compatibility).
-# ---------------------------------------------------------------------------
-class DocumentTools:
-    """Read and write common office document formats."""
+def _ok(text: str) -> Dict[str, Any]:
+    return {"content": [{"type": "text", "text": text}]}
 
-    # ---- Excel ---------------------------------------------------------
-    @staticmethod
-    def read_excel(path: str) -> Dict[str, List[List[Any]]]:
-        try:
-            import openpyxl
-        except ImportError as exc:  # pragma: no cover
-            raise MissingDependencyError(
-                "openpyxl is required to read Excel files (pip install openpyxl)."
-            ) from exc
-        wb = openpyxl.load_workbook(path, data_only=True)
-        return {
-            sheet.title: [list(row) for row in sheet.iter_rows(values_only=True)]
-            for sheet in wb.worksheets
-        }
 
-    @staticmethod
-    def write_excel(path: str, rows: List[List[Any]], sheet_name: str = "Sheet1") -> str:
-        try:
-            import openpyxl
-        except ImportError as exc:  # pragma: no cover
-            raise MissingDependencyError(
-                "openpyxl is required to write Excel files (pip install openpyxl)."
-            ) from exc
+def _err(text: str) -> Dict[str, Any]:
+    return {"content": [{"type": "text", "text": f"ERROR: {text}"}], "is_error": True}
+
+
+# --------------------------------------------------------------------------- #
+# Excel
+# --------------------------------------------------------------------------- #
+@tool("write_excel", "Write rows of data to a real .xlsx file", {"path": str, "rows_json": str})
+async def write_excel(args: Dict[str, Any]) -> Dict[str, Any]:
+    import json
+
+    try:
+        import openpyxl
+    except ImportError:
+        return _err("openpyxl is not installed (pip install openpyxl).")
+    try:
+        rows = json.loads(args["rows_json"])
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.title = sheet_name
         for row in rows:
-            ws.append(row)
-        wb.save(path)
-        return path
+            ws.append(row if isinstance(row, list) else [row])
+        wb.save(args["path"])
+        return _ok(f"Wrote {len(rows)} rows to {args['path']}")
+    except Exception as exc:  # surface real errors to the model
+        return _err(str(exc))
 
-    # ---- Word ----------------------------------------------------------
-    @staticmethod
-    def read_word(path: str) -> str:
-        try:
-            import docx
-        except ImportError as exc:  # pragma: no cover
-            raise MissingDependencyError(
-                "python-docx is required to read Word files (pip install python-docx)."
-            ) from exc
-        document = docx.Document(path)
-        return "\n".join(p.text for p in document.paragraphs)
 
-    @staticmethod
-    def write_word(path: str, content: str) -> str:
-        try:
-            import docx
-        except ImportError as exc:  # pragma: no cover
-            raise MissingDependencyError(
-                "python-docx is required to write Word files (pip install python-docx)."
-            ) from exc
+@tool("read_excel", "Read all rows from the first sheet of an .xlsx file", {"path": str})
+async def read_excel(args: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        import openpyxl
+    except ImportError:
+        return _err("openpyxl is not installed (pip install openpyxl).")
+    try:
+        wb = openpyxl.load_workbook(args["path"], data_only=True)
+        ws = wb.active
+        rows = [list(r) for r in ws.iter_rows(values_only=True)]
+        return _ok(str(rows))
+    except Exception as exc:
+        return _err(str(exc))
+
+
+# --------------------------------------------------------------------------- #
+# Word
+# --------------------------------------------------------------------------- #
+@tool("write_word", "Write text content to a real .docx file", {"path": str, "content": str})
+async def write_word(args: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        import docx
+    except ImportError:
+        return _err("python-docx is not installed (pip install python-docx).")
+    try:
         document = docx.Document()
-        for paragraph in content.split("\n"):
+        for paragraph in args["content"].split("\n"):
             document.add_paragraph(paragraph)
-        document.save(path)
-        return path
+        document.save(args["path"])
+        return _ok(f"Wrote document to {args['path']}")
+    except Exception as exc:
+        return _err(str(exc))
 
-    # ---- PowerPoint ----------------------------------------------------
-    @staticmethod
-    def read_powerpoint(path: str) -> List[str]:
-        try:
-            from pptx import Presentation
-        except ImportError as exc:  # pragma: no cover
-            raise MissingDependencyError(
-                "python-pptx is required to read PowerPoint files (pip install python-pptx)."
-            ) from exc
-        prs = Presentation(path)
-        slides: List[str] = []
-        for slide in prs.slides:
-            texts = [
-                shape.text
-                for shape in slide.shapes
-                if shape.has_text_frame and shape.text
-            ]
-            slides.append("\n".join(texts))
-        return slides
 
-    @staticmethod
-    def write_powerpoint(path: str, slides: List[Dict[str, str]]) -> str:
-        try:
-            from pptx import Presentation
-        except ImportError as exc:  # pragma: no cover
-            raise MissingDependencyError(
-                "python-pptx is required to write PowerPoint files (pip install python-pptx)."
-            ) from exc
+@tool("read_word", "Read all paragraph text from a .docx file", {"path": str})
+async def read_word(args: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        import docx
+    except ImportError:
+        return _err("python-docx is not installed (pip install python-docx).")
+    try:
+        document = docx.Document(args["path"])
+        return _ok("\n".join(p.text for p in document.paragraphs))
+    except Exception as exc:
+        return _err(str(exc))
+
+
+# --------------------------------------------------------------------------- #
+# PowerPoint
+# --------------------------------------------------------------------------- #
+@tool(
+    "write_powerpoint",
+    "Write slides to a real .pptx file. slides_json is a list of {title, body}.",
+    {"path": str, "slides_json": str},
+)
+async def write_powerpoint(args: Dict[str, Any]) -> Dict[str, Any]:
+    import json
+
+    try:
+        from pptx import Presentation
+    except ImportError:
+        return _err("python-pptx is not installed (pip install python-pptx).")
+    try:
+        slides = json.loads(args["slides_json"])
         prs = Presentation()
         layout = prs.slide_layouts[1]
         for spec in slides:
             slide = prs.slides.add_slide(layout)
             slide.shapes.title.text = spec.get("title", "")
             slide.placeholders[1].text = spec.get("body", "")
-        prs.save(path)
-        return path
+        prs.save(args["path"])
+        return _ok(f"Wrote {len(slides)} slides to {args['path']}")
+    except Exception as exc:
+        return _err(str(exc))
 
 
-# ---------------------------------------------------------------------------
-# Schema-based tool wrappers.
-# ---------------------------------------------------------------------------
-class ExcelReadTool(Tool):
-    name = "excel_read"
-    description = (
-        "Read every sheet of an Excel workbook (.xlsx) and return its cells "
-        "as a dict mapping sheet name to a list of rows."
-    )
-    input_schema = {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string", "description": "Filesystem path to the .xlsx file."}
-        },
-        "required": ["path"],
-        "additionalProperties": False,
-    }
+# --------------------------------------------------------------------------- #
+# Web search (real, via Tavily; errors clearly if unconfigured)
+# --------------------------------------------------------------------------- #
+@tool("web_search", "Search the web for up-to-date information", {"query": str})
+async def web_search(args: Dict[str, Any]) -> Dict[str, Any]:
+    api_key = os.getenv("TAVILY_API_KEY")
+    if not api_key:
+        return _err("web_search requires TAVILY_API_KEY to be set.")
+    try:
+        import requests
 
-    def execute(self, *, path: str) -> Dict[str, List[List[Any]]]:
-        return DocumentTools.read_excel(path)
-
-
-class ExcelWriteTool(Tool):
-    name = "excel_write"
-    description = "Write rows to a single-sheet Excel workbook (.xlsx)."
-    input_schema = {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string"},
-            "rows": {
-                "type": "array",
-                "items": {"type": "array"},
-                "description": "List of rows; each row is a list of cell values.",
-            },
-            "sheet_name": {"type": "string", "default": "Sheet1"},
-        },
-        "required": ["path", "rows"],
-        "additionalProperties": False,
-    }
-
-    def execute(self, *, path: str, rows: List[List[Any]], sheet_name: str = "Sheet1") -> str:
-        return DocumentTools.write_excel(path, rows, sheet_name)
-
-
-class WordReadTool(Tool):
-    name = "word_read"
-    description = "Read a Word document (.docx) and return its body text."
-    input_schema = {
-        "type": "object",
-        "properties": {"path": {"type": "string"}},
-        "required": ["path"],
-        "additionalProperties": False,
-    }
-
-    def execute(self, *, path: str) -> str:
-        return DocumentTools.read_word(path)
-
-
-class WordWriteTool(Tool):
-    name = "word_write"
-    description = "Write paragraphs to a Word document (.docx). Newlines become paragraph breaks."
-    input_schema = {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string"},
-            "content": {"type": "string"},
-        },
-        "required": ["path", "content"],
-        "additionalProperties": False,
-    }
-
-    def execute(self, *, path: str, content: str) -> str:
-        return DocumentTools.write_word(path, content)
-
-
-class PowerPointReadTool(Tool):
-    name = "powerpoint_read"
-    description = "Read a PowerPoint deck (.pptx) and return a list of slide texts."
-    input_schema = {
-        "type": "object",
-        "properties": {"path": {"type": "string"}},
-        "required": ["path"],
-        "additionalProperties": False,
-    }
-
-    def execute(self, *, path: str) -> List[str]:
-        return DocumentTools.read_powerpoint(path)
-
-
-class PowerPointWriteTool(Tool):
-    name = "powerpoint_write"
-    description = "Write a PowerPoint deck (.pptx) from a list of {title, body} slides."
-    input_schema = {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string"},
-            "slides": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "title": {"type": "string"},
-                        "body": {"type": "string"},
-                    },
-                    "additionalProperties": False,
-                },
-            },
-        },
-        "required": ["path", "slides"],
-        "additionalProperties": False,
-    }
-
-    def execute(self, *, path: str, slides: List[Dict[str, str]]) -> str:
-        return DocumentTools.write_powerpoint(path, slides)
-
-
-# ---------------------------------------------------------------------------
-# Web search.
-# ---------------------------------------------------------------------------
-class WebSearchTool(Tool):
-    """Web research tool, backed by Tavily when ``TAVILY_API_KEY`` is set."""
-
-    name = "web_search"
-    description = (
-        "Search the public web and return up to N {title, url, content} results. "
-        "Requires TAVILY_API_KEY."
-    )
-    input_schema = {
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "minLength": 1},
-            "max_results": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
-        },
-        "required": ["query"],
-        "additionalProperties": False,
-    }
-
-    def execute(self, *, query: str, max_results: int = 5) -> List[Dict[str, str]]:
-        import os
-
-        api_key = os.getenv("TAVILY_API_KEY")
-        if not api_key:
-            raise ToolError(
-                "Web search requires TAVILY_API_KEY (or wire in your own provider)."
-            )
-        try:
-            import requests
-        except ImportError as exc:  # pragma: no cover
-            raise ToolError(
-                "requests is required for web search (pip install requests)."
-            ) from exc
         resp = requests.post(
             "https://api.tavily.com/search",
-            json={"api_key": api_key, "query": query, "max_results": max_results},
+            json={"api_key": api_key, "query": args["query"], "max_results": 5},
             timeout=30,
         )
         resp.raise_for_status()
-        data = resp.json()
-        return [
-            {"title": r.get("title", ""), "url": r.get("url", ""), "content": r.get("content", "")}
-            for r in data.get("results", [])
-        ]
+        results = resp.json().get("results", [])
+        lines = [f"- {r.get('title')}: {r.get('url')}\n  {r.get('content', '')[:300]}" for r in results]
+        return _ok("\n".join(lines) if lines else "No results.")
+    except Exception as exc:
+        return _err(str(exc))
+
+
+ALL_TOOLS = [
+    write_excel,
+    read_excel,
+    write_word,
+    read_word,
+    write_powerpoint,
+    web_search,
+]
+
+# Fully-qualified tool names as the agents must reference them in allowed_tools.
+TOOL_SERVER_NAME = "council_tools"
+DOCUMENT_TOOL_NAMES = [
+    f"mcp__{TOOL_SERVER_NAME}__write_excel",
+    f"mcp__{TOOL_SERVER_NAME}__read_excel",
+    f"mcp__{TOOL_SERVER_NAME}__write_word",
+    f"mcp__{TOOL_SERVER_NAME}__read_word",
+    f"mcp__{TOOL_SERVER_NAME}__write_powerpoint",
+]
+WEB_SEARCH_TOOL_NAME = f"mcp__{TOOL_SERVER_NAME}__web_search"
+
+
+def build_tool_server():
+    """Create the in-process MCP server exposing all council tools."""
+    return create_sdk_mcp_server(name=TOOL_SERVER_NAME, version="1.0.0", tools=ALL_TOOLS)

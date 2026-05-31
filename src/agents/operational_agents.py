@@ -1,202 +1,165 @@
 """Tier 1-2 operational agents that execute the work."""
-import re
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
 
-from core.claude_agent import ClaudeAgent
+from core.base_agent import Agent
 from config.models import OPUS, SONNET
+from tools.document_tools import DOCUMENT_TOOL_NAMES, WEB_SEARCH_TOOL_NAME
 
 
-class Orchestrator(ClaudeAgent):
-    def __init__(self):
-        super().__init__(
-            name="Orchestrator",
-            description="Parent agent, tier classification, coordination",
-            model=OPUS,
-            system_prompt=(
-                "You are the Orchestrator. Classify task complexity into a tier "
-                "(1=trivial, 2=standard, 3=complex, 4=critical) and coordinate "
-                "the operational agents."
-            ),
-        )
-
-    def classify_tier(self, task: str) -> int:
-        """Estimate task complexity tier from signal words and length."""
-        text = task.lower()
-        score = 1
-        complex_signals = [
-            "architecture", "design", "security", "compliance", "migrate",
-            "end-to-end", "production", "scal", "multi", "strategy", "audit",
-            "comprehensive", "enterprise", "critical",
-        ]
-        score += sum(1 for s in complex_signals if s in text)
-        if len(task) > 400:
-            score += 1
-        if len(re.findall(r"[.!?]", task)) > 4:
-            score += 1
-        return max(1, min(4, score))
+def orchestrator() -> Agent:
+    return Agent(
+        name="Orchestrator",
+        description="Parent agent, tier classification, coordination",
+        model=OPUS,
+        system_prompt=(
+            "You are the Orchestrator. Classify the task's complexity into a tier: "
+            "1=trivial, 2=standard, 3=complex, 4=critical. Consider scope, risk, and "
+            "how many domains are involved. Reply with a one-line justification then "
+            "a final line 'TIER: <n>'."
+        ),
+        max_turns=2,
+    )
 
 
-class TaskAnalyst(ClaudeAgent):
-    def __init__(self):
-        super().__init__(
-            name="Task Analyst",
-            description="Task decomposition & requirements analysis",
-            model=SONNET,
-            system_prompt=(
-                "You are the Task Analyst. Decompose the task into explicit "
-                "requirements, constraints, and success criteria."
-            ),
-        )
+def task_analyst() -> Agent:
+    return Agent(
+        name="Task Analyst",
+        description="Task decomposition & requirements analysis",
+        model=SONNET,
+        system_prompt=(
+            "You are the Task Analyst. Decompose the task into explicit "
+            "requirements, constraints, and measurable success criteria."
+        ),
+    )
 
 
-class Planner(ClaudeAgent):
-    def __init__(self):
-        super().__init__(
-            name="Planner",
-            description="Execution planning & sequencing",
-            model=SONNET,
-            system_prompt=(
-                "You are the Planner. Produce an ordered, actionable execution "
-                "plan with clear steps and dependencies."
-            ),
-        )
+def planner() -> Agent:
+    return Agent(
+        name="Planner",
+        description="Execution planning & sequencing",
+        model=SONNET,
+        system_prompt=(
+            "You are the Planner. Produce an ordered, actionable execution plan with "
+            "clear steps and dependencies."
+        ),
+    )
 
 
-class Clarifier(ClaudeAgent):
-    def __init__(self):
-        super().__init__(
-            name="Clarifier",
-            description="Question formulation for missing requirements",
-            model=SONNET,
-            system_prompt=(
-                "You are the Clarifier. Identify ambiguities and formulate the "
-                "minimal set of questions needed to proceed confidently."
-            ),
-        )
+def clarifier() -> Agent:
+    return Agent(
+        name="Clarifier",
+        description="Question formulation for missing requirements",
+        model=SONNET,
+        system_prompt=(
+            "You are the Clarifier. Identify ambiguities and formulate the minimal "
+            "set of questions needed to proceed confidently."
+        ),
+    )
 
 
-class Researcher(ClaudeAgent):
-    def __init__(self):
-        super().__init__(
-            name="Researcher",
-            description="Evidence gathering & web research",
-            model=SONNET,
-            system_prompt=(
-                "You are the Researcher. Gather relevant evidence and cite "
-                "sources where possible."
-            ),
-        )
+def researcher() -> Agent:
+    return Agent(
+        name="Researcher",
+        description="Evidence gathering & web research",
+        model=SONNET,
+        system_prompt=(
+            "You are the Researcher. Gather relevant evidence. Use the web_search "
+            "tool when current or external facts are needed, and cite the sources "
+            "you used."
+        ),
+        allowed_tools=[WEB_SEARCH_TOOL_NAME],
+    )
 
 
-class Executor(ClaudeAgent):
-    def __init__(self):
-        super().__init__(
-            name="Executor",
-            description="Solution generation with Tree of Thoughts",
-            model=SONNET,
-            max_tokens=2048,
-            system_prompt=(
-                "You are the Executor. Generate the solution using a Tree of "
-                "Thoughts: briefly explore alternative approaches, then commit "
-                "to and develop the strongest one."
-            ),
-        )
+def executor() -> Agent:
+    return Agent(
+        name="Executor",
+        description="Solution generation with Tree of Thoughts",
+        model=SONNET,
+        system_prompt=(
+            "You are the Executor. Generate the solution using a Tree of Thoughts: "
+            "briefly explore alternative approaches, then commit to and develop the "
+            "strongest one. If asked to produce a document, use the document tools "
+            "to write the real file."
+        ),
+        allowed_tools=list(DOCUMENT_TOOL_NAMES),
+        max_turns=12,
+    )
 
 
-class CodeReviewer(ClaudeAgent):
-    def __init__(self):
-        super().__init__(
-            name="Code Reviewer",
-            description="Security, performance, style review",
-            model=SONNET,
-            system_prompt=(
-                "You are the Code Reviewer. Review for security, performance, "
-                "and style issues, and suggest concrete fixes."
-            ),
-        )
+def code_reviewer() -> Agent:
+    return Agent(
+        name="Code Reviewer",
+        description="Security, performance, style review",
+        model=SONNET,
+        system_prompt=(
+            "You are the Code Reviewer. Review for security, performance, and style "
+            "issues, and suggest concrete fixes."
+        ),
+    )
 
 
-class Formatter(ClaudeAgent):
-    def __init__(self):
-        super().__init__(
-            name="Formatter",
-            description="Multi-format output generation",
-            model=SONNET,
-            system_prompt=(
-                "You are the Formatter. Render the final content cleanly in the "
-                "requested output format."
-            ),
-        )
+def formatter() -> Agent:
+    return Agent(
+        name="Formatter",
+        description="Multi-format output generation",
+        model=SONNET,
+        system_prompt=(
+            "You are the Formatter. Render the final content cleanly in the "
+            "requested format. Use the document tools to produce real .xlsx/.docx/"
+            ".pptx files when asked."
+        ),
+        allowed_tools=list(DOCUMENT_TOOL_NAMES),
+    )
 
 
-class Verifier(ClaudeAgent):
-    def __init__(self):
-        super().__init__(
-            name="Verifier",
-            description="Hallucination detection & fact-checking",
-            model=OPUS,
-            system_prompt=(
-                "You are the Verifier. Check the output for unsupported claims "
-                "and factual errors, and report a confidence assessment."
-            ),
-        )
+def verifier() -> Agent:
+    return Agent(
+        name="Verifier",
+        description="Hallucination detection & fact-checking",
+        model=OPUS,
+        system_prompt=(
+            "You are the Verifier. Check the output for unsupported claims and "
+            "factual errors. Use web_search to confirm questionable facts, and "
+            "report a confidence assessment."
+        ),
+        allowed_tools=[WEB_SEARCH_TOOL_NAME],
+    )
 
 
-class Critic(ClaudeAgent):
-    """Adversarial reviewer attacking along five vectors."""
-
-    ATTACK_VECTORS = [
-        "Correctness",
-        "Completeness",
-        "Security",
-        "Edge cases",
-        "Clarity",
-    ]
-
-    def __init__(self):
-        super().__init__(
-            name="Critic",
-            description="Adversarial attack (5 vectors)",
-            model=OPUS,
-            system_prompt=(
-                "You are the Critic. Adversarially attack the output along five "
-                "vectors: correctness, completeness, security, edge cases, and "
-                "clarity. Be specific and ruthless."
-            ),
-        )
-
-    def attack(self, output: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
-        """Run the critique across each attack vector and return findings."""
-        findings: Dict[str, str] = {}
-        for vector in self.ATTACK_VECTORS:
-            findings[vector] = self.run(
-                f"Attack this output on the '{vector}' vector and list weaknesses:\n{output}",
-                context=context,
-            )
-        return findings
+def critic() -> Agent:
+    return Agent(
+        name="Critic",
+        description="Adversarial attack (5 vectors)",
+        model=OPUS,
+        system_prompt=(
+            "You are the Critic. Adversarially attack the output along five vectors: "
+            "correctness, completeness, security, edge cases, and clarity. For each "
+            "vector list specific, concrete weaknesses."
+        ),
+    )
 
 
-class Reviewer(ClaudeAgent):
-    def __init__(self):
-        super().__init__(
-            name="Reviewer",
-            description="Final quality gate",
-            model=OPUS,
-            system_prompt=(
-                "You are the Reviewer, the final quality gate. Decide whether "
-                "the output is ready to ship and summarise the verdict."
-            ),
-        )
+def reviewer() -> Agent:
+    return Agent(
+        name="Reviewer",
+        description="Final quality gate",
+        model=OPUS,
+        system_prompt=(
+            "You are the Reviewer, the final quality gate. Decide whether the output "
+            "is ready to ship, produce the final ship-ready output, and end with a "
+            "line 'VERDICT: PASS' or 'VERDICT: FAIL'."
+        ),
+    )
 
 
-class MemoryCurator(ClaudeAgent):
-    def __init__(self):
-        super().__init__(
-            name="Memory Curator",
-            description="Knowledge extraction & persistence",
-            model=SONNET,
-            system_prompt=(
-                "You are the Memory Curator. Extract durable, reusable knowledge "
-                "from the task and its outcome for future reference."
-            ),
-        )
+def memory_curator() -> Agent:
+    return Agent(
+        name="Memory Curator",
+        description="Knowledge extraction & persistence",
+        model=SONNET,
+        system_prompt=(
+            "You are the Memory Curator. Extract durable, reusable knowledge from "
+            "the task and its outcome for future reference."
+        ),
+    )

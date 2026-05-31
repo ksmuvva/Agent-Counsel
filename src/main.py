@@ -1,27 +1,36 @@
-"""Demo entry point for the Multi-Agent Council System."""
+"""Demo entry point for the Multi-Agent Council System.
+
+Runs the real pipeline end-to-end via the Claude Agent SDK. Requires a working
+SDK environment (an authenticated `claude` CLI or ANTHROPIC_API_KEY).
+"""
+import asyncio
 import json
 
 from core import CouncilSystem
 
 
-def main():
-    print("Initializing Multi-Agent Council System...")
-    system = CouncilSystem(budget=20.0)
+async def _main() -> None:
+    print("Initializing Multi-Agent Council System (Claude Agent SDK)...\n")
+    system = CouncilSystem(budget=20.0, log=lambda m: print(f"  • {m}"))
 
-    task = "Develop a comprehensive market analysis report for a new SaaS product."
+    task = "Write a concise one-page market analysis for a new AI note-taking SaaS product."
     print(f"Executing task: {task}\n")
 
-    result = system.run(task)
+    result = await system.run(task)
 
-    print(f"Tier: {result.tier}")
+    print(f"\nTier: {result.tier}")
     if result.selected_personas:
         print(f"Selected SME personas: {', '.join(result.selected_personas)}")
-    print(f"Revised: {result.revised} | Passed quality gate: {result.passed}\n")
+    print(f"Passed quality gate: {result.passed}\n")
     print("=== Final Verdict ===")
     print(result.final_output)
 
-    print("\n=== Cost Report ===")
+    print("\n=== Cost Report (real, from SDK) ===")
     print(json.dumps(system.cost_summary(), indent=2))
+
+
+def main() -> None:
+    asyncio.run(_main())
 
 
 if __name__ == "__main__":

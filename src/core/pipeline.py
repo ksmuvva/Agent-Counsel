@@ -1,13 +1,33 @@
-"""Phase execution pipeline and the key collaboration mechanisms.
+"""Phase execution pipeline — real, async, multi-agent orchestration.
 
-Agent classes are imported lazily inside methods to avoid a circular import:
-``core`` imports this module during package init, while the agent modules import
-``core.claude_agent``.
+Every phase is an actual agent run via the Claude Agent SDK. Agents may call
+the in-process tool server during their reasoning. Control signals (tier,
+selected personas, pass/fail verdict) are parsed from the agents' own output.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List
+
+from agents.operational_agents import (
+    critic,
+    executor,
+    orchestrator,
+    planner,
+    reviewer,
+    task_analyst,
+    verifier,
+)
+from agents.strategic_council import (
+    domain_council_chair,
+    ethics_safety_advisor,
+    quality_arbiter,
+)
+from agents.sme_personas import SMEPersonaManager
+from core.base_agent import Agent
+from core.cost_tracker import CostTracker
+from tools.document_tools import build_tool_server
 
 
 @dataclass
@@ -16,7 +36,6 @@ class PipelineResult:
     tier: int
     phases: Dict[str, Any] = field(default_factory=dict)
     selected_personas: List[str] = field(default_factory=list)
-    revised: bool = False
     passed: bool = False
     final_output: str = ""
 
@@ -26,77 +45,75 @@ class PipelineResult:
             "tier": self.tier,
             "selected_personas": self.selected_personas,
             "phases": self.phases,
-            "revised": self.revised,
             "passed": self.passed,
             "final_output": self.final_output,
         }
 
 
+def _parse_tier(text: str) -> int:
+    match = re.search(r"TIER:\s*([1-4])", text or "", re.IGNORECASE)
+    return int(match.group(1)) if match else 2
+
+
+def _parse_personas(text: str, available: List[str]) -> List[str]:
+    match = re.search(r"SELECTED:\s*(.+)", text or "", re.IGNORECASE)
+    if not match:
+        return []
+    named = match.group(1)
+    return [p for p in available if p.lower() in named.lower()]
+
+
+def _parse_verdict(text: str) -> bool:
+    return bool(re.search(r"VERDICT:\s*PASS", text or "", re.IGNORECASE))
+
+
 class PhaseExecutionPipeline:
     """Structured workflow with Council consultation for complex tasks."""
 
-    def __init__(
-        self,
-        orchestrator: "Orchestrator",
-        council: List[Any],
-        sme_manager: Optional["SMEPersonaManager"] = None,
-        verdict_matrix: Optional["VerdictMatrix"] = None,
-        log: Optional[Callable[[str], None]] = None,
-    ):
-        from agents import (
-            Critic,
-            Executor,
-            Planner,
-            QualityArbiter,
-            Reviewer,
-            TaskAnalyst,
-            Verifier,
-        )
-        from agents.sme_personas import SMEPersonaManager
-
-        self.orchestrator = orchestrator
-        self.council = council
-        self.sme_manager = sme_manager or SMEPersonaManager()
-        self.task_analyst = TaskAnalyst()
-        self.planner = Planner()
-        self.executor = Executor()
-        self.critic = Critic()
-        self.verifier = Verifier()
-        self.reviewer = Reviewer()
-        self.verdict_matrix = verdict_matrix or VerdictMatrix(
-            self._find(QualityArbiter), self.reviewer
-        )
+    def __init__(self, cost_tracker: CostTracker, log=None) -> None:
+        self.cost_tracker = cost_tracker
+        self.sme_manager = SMEPersonaManager()
+        self.tool_server = build_tool_server()
+        self._servers = {"council_tools": self.tool_server}
         self._log = log or (lambda msg: None)
 
-    def _find(self, cls):
-        for member in self.council:
-            if isinstance(member, cls):
-                return member
-        return cls()
+    async def _run(self, agent: Agent, task: str, context=None) -> str:
+        result = await agent.run(
+            task,
+            context=context,
+            mcp_servers=self._servers,
+            cost_tracker=self.cost_tracker,
+        )
+        if result.tools_used:
+            self._log(f"{agent.name} used tools: {', '.join(result.tools_used)}")
+        return result.text
 
-    def run(self, task: str) -> PipelineResult:
-        from agents import DomainCouncilChair, EthicsSafetyAdvisor, QualityArbiter
-
-        tier = self.orchestrator.classify_tier(task)
-        self._log(f"Classified task as Tier {tier}")
+    async def run(self, task: str) -> PipelineResult:
+        # Phase 0: tier classification (a real agent decision)
+        tier_text = await self._run(orchestrator(), task)
+        tier = _parse_tier(tier_text)
+        self._log(f"Orchestrator classified task as Tier {tier}")
         result = PipelineResult(task=task, tier=tier)
 
         # Phase 1: Analysis
-        analysis = self.task_analyst.run(task)
+        analysis = await self._run(task_analyst(), task)
         result.phases["Analysis"] = analysis
+        context: Dict[str, Any] = {"Analysis": analysis}
 
         # Phase 2: Council consultation (Tier 3-4 only)
-        context: Dict[str, Any] = {"Analysis": analysis}
         if tier >= 3:
             self._log("Consulting Strategic Council")
-            chair = self._find(DomainCouncilChair)
-            personas = chair.select_personas(task, self.sme_manager.list_available())
-            result.selected_personas = personas
-            standards = self._find(QualityArbiter).run(
-                f"Define quality standards for this task:\n{task}"
+            chair_text = await self._run(
+                domain_council_chair(), task, {"Analysis": analysis}
             )
-            ethics = self._find(EthicsSafetyAdvisor).run(
-                f"Review this task for ethics/safety concerns:\n{task}"
+            personas = _parse_personas(chair_text, self.sme_manager.list_available())
+            result.selected_personas = personas
+            standards = await self._run(
+                quality_arbiter(), f"Define quality standards for this task:\n{task}"
+            )
+            ethics = await self._run(
+                ethics_safety_advisor(),
+                f"Review this task for ethics/safety concerns:\n{task}",
             )
             result.phases["Council"] = {
                 "selected_personas": personas,
@@ -105,145 +122,44 @@ class PhaseExecutionPipeline:
             }
             context["Quality standards"] = standards
 
+            # Engage the selected SME experts for real
+            sme_inputs = {}
+            for persona_name in personas:
+                persona = self.sme_manager.get_persona(persona_name)
+                if persona:
+                    sme_inputs[persona_name] = await self._run(persona, task, context)
+            if sme_inputs:
+                result.phases["SME Input"] = sme_inputs
+                context["Expert input"] = "\n\n".join(
+                    f"{k}: {v}" for k, v in sme_inputs.items()
+                )
+
         # Phase 3: Planning
-        plan = self.planner.run(task, context=context)
+        plan = await self._run(planner(), task, context)
         result.phases["Planning"] = plan
         context["Plan"] = plan
 
-        # Phase 4: Execution
-        solution = self.executor.run(task, context=context)
+        # Phase 4: Execution (may call document tools)
+        solution = await self._run(executor(), task, context)
         result.phases["Execution"] = solution
 
-        # Phase 5: Review & verification
-        critique = self.critic.attack(solution, context=context)
-        verification = self.verifier.run(
-            f"Verify this solution for factual accuracy:\n{solution}"
+        # Phase 5: Adversarial critique + verification
+        critique = await self._run(
+            critic(), f"Attack this solution:\n{solution}", context
+        )
+        verification = await self._run(
+            verifier(), f"Verify this solution for factual accuracy:\n{solution}"
         )
         result.phases["Review"] = {"critique": critique, "verification": verification}
 
-        # Verdict matrix quality gate (one revision cycle on failure)
-        passed = self.verdict_matrix.evaluate(solution, context)
-        if not passed:
-            self._log("Verdict failed - triggering revision")
-            solution = self.executor.run(
-                task,
-                context={**context, "Critique": critique, "Verification": verification},
-            )
-            result.phases["Revision"] = solution
-            result.revised = True
-            passed = self.verdict_matrix.evaluate(solution, context)
-        result.passed = passed
-
-        # Final verdict
-        final = self.reviewer.run(
-            f"Provide the final verdict and ship-ready output:\n{solution}"
+        # Phase 6: Final verdict (reviewer decides PASS/FAIL)
+        final = await self._run(
+            reviewer(),
+            f"Produce the final ship-ready output and verdict.\n\n"
+            f"Solution:\n{solution}\n\nCritique:\n{critique}\n\n"
+            f"Verification:\n{verification}",
         )
+        result.passed = _parse_verdict(final)
         result.phases["Final Verdict"] = final
         result.final_output = final
         return result
-
-
-class SelfPlayDebate:
-    """Multi-perspective reasoning resolved by a tiebreaker."""
-
-    def __init__(self, participants: List[Any], tiebreaker: "QualityArbiter"):
-        self.participants = participants
-        self.tiebreaker = tiebreaker
-
-    def conduct_debate(self, topic: str) -> Dict[str, Any]:
-        arguments: Dict[str, str] = {}
-        for index, participant in enumerate(self.participants):
-            label = getattr(participant, "name", str(participant))
-            if label in arguments:  # disambiguate duplicate participant names
-                label = f"{label} #{index + 1}"
-            arguments[label] = participant.run(f"Argue your perspective on: {topic}")
-        joined = "\n\n".join(f"{name}: {arg}" for name, arg in arguments.items())
-        verdict = self.tiebreaker.run(f"Review these arguments and decide:\n{joined}")
-        return {"arguments": arguments, "verdict": verdict}
-
-
-class VerdictMatrix:
-    """Quality gate that scores output against weighted standards."""
-
-    DEFAULT_CRITERIA = {
-        "completeness": 0.30,
-        "correctness": 0.30,
-        "clarity": 0.20,
-        "safety": 0.20,
-    }
-
-    def __init__(
-        self,
-        quality_arbiter: "QualityArbiter",
-        reviewer: "Reviewer",
-        threshold: float = 0.6,
-        criteria: Optional[Dict[str, float]] = None,
-    ):
-        self.quality_arbiter = quality_arbiter
-        self.reviewer = reviewer
-        self.threshold = threshold
-        self.criteria = criteria or dict(self.DEFAULT_CRITERIA)
-        self.last_scores: Dict[str, float] = {}
-
-    def evaluate(self, output: str, standards: Optional[Dict[str, Any]] = None) -> bool:
-        """Score the output against weighted criteria and return whether it
-        clears the threshold.
-
-        Structural signals provide a fast pre-screen (length, presence of
-        explicit error markers, paragraph structure). For deep semantic
-        scoring, callers should invoke :meth:`arbiter_score` which delegates
-        to the real Quality Arbiter agent.
-        """
-        text = output or ""
-        word_count = len(text.split())
-        scores = {
-            "completeness": min(1.0, word_count / 80.0),
-            "correctness": 0.8 if "error" not in text.lower() else 0.4,
-            "clarity": min(1.0, text.count("\n") / 4.0 + 0.4),
-            "safety": 0.9,
-        }
-        weighted = sum(scores[k] * self.criteria.get(k, 0) for k in scores)
-        self.last_scores = {**scores, "weighted": round(weighted, 3)}
-        return weighted >= self.threshold
-
-    def arbiter_score(self, output: str) -> str:
-        """Ask the real Quality Arbiter agent to judge the output."""
-        return self.quality_arbiter.run(
-            "Score the following output on completeness, correctness, clarity "
-            "and safety (0-1 each) and give a short justification:\n" + output
-        )
-
-
-class EnsemblePatterns:
-    """Pre-configured agent collaborations for common task types."""
-
-    @staticmethod
-    def _chain(agents: List[Any], task: str) -> Dict[str, str]:
-        results: Dict[str, str] = {}
-        context: Dict[str, Any] = {}
-        for agent in agents:
-            output = agent.run(task, context=context)
-            name = getattr(agent, "name", str(agent))
-            results[name] = output
-            context[name] = output
-        return results
-
-    @classmethod
-    def creative_writing(cls, researcher, executor, reviewer, task: str) -> Dict[str, str]:
-        return cls._chain([researcher, executor, reviewer], task)
-
-    @classmethod
-    def code_generation(cls, analyst, planner, executor, reviewer, task: str) -> Dict[str, str]:
-        return cls._chain([analyst, planner, executor, reviewer], task)
-
-    @classmethod
-    def research_and_analysis(cls, researcher, analyst, verifier, task: str) -> Dict[str, str]:
-        return cls._chain([researcher, analyst, verifier], task)
-
-    @classmethod
-    def security_audit(cls, critic, code_reviewer, advisor, task: str) -> Dict[str, str]:
-        return cls._chain([critic, code_reviewer, advisor], task)
-
-    @classmethod
-    def documentation(cls, analyst, writer, reviewer, task: str) -> Dict[str, str]:
-        return cls._chain([analyst, writer, reviewer], task)

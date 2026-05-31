@@ -65,13 +65,14 @@ uvicorn==0.48.0
 watchdog==6.0.0
 websockets==16.0
 
-# Claude API (required — the system is real-only and fails fast without it)
-anthropic
-
-# Document tooling (optional; required only if you call the Excel/Word/PPT tools)
+# Document tooling (enables real Excel/Word/PPT I/O via agent tools)
 openpyxl
 python-docx
 python-pptx
 
+# Web search tool (optional; enables the Researcher's web_search tool)
+requests
+
 # Testing
 pytest
+pytest-asyncio

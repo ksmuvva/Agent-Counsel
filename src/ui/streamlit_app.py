@@ -1,4 +1,6 @@
 """Streamlit web interface for the Multi-Agent Council System."""
+import asyncio
+
 import streamlit as st
 
 from agents.sme_personas import SMEPersonaManager
@@ -6,6 +8,7 @@ from core import CouncilSystem
 
 st.set_page_config(page_title="Agent-Counsel", page_icon="🏛️", layout="wide")
 st.title("🏛️ Agent-Counsel — Multi-Agent Council System")
+st.caption("Real tool-using agents powered by the Claude Agent SDK.")
 
 with st.sidebar:
     st.header("Configuration")
@@ -18,20 +21,18 @@ with st.sidebar:
 
 task = st.text_area(
     "Task",
-    value="Develop a comprehensive market analysis report for a new SaaS product.",
+    value="Write a concise one-page market analysis for a new AI note-taking SaaS product.",
     height=120,
 )
 
 if st.button("Run Council", type="primary"):
     system = CouncilSystem(budget=budget, enforce_budget=enforce)
+    with st.spinner("The council is deliberating (real agents)..."):
+        result = asyncio.run(system.run(task))
 
-    with st.spinner("The council is deliberating..."):
-        result = system.run(task)
-
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
     c1.metric("Tier", result.tier)
-    c2.metric("Revised", "Yes" if result.revised else "No")
-    c3.metric("Passed gate", "Yes" if result.passed else "No")
+    c2.metric("Passed gate", "Yes" if result.passed else "No")
 
     if result.selected_personas:
         st.success("Selected SME personas: " + ", ".join(result.selected_personas))
@@ -44,5 +45,5 @@ if st.button("Run Council", type="primary"):
             st.markdown(f"**{phase}**")
             st.write(output)
 
-    st.subheader("Cost Report")
+    st.subheader("Cost Report (real, from SDK)")
     st.json(system.cost_summary())
