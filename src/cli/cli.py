@@ -19,7 +19,6 @@ def run(
 ):
     """Run a task through the full phase execution pipeline."""
     system = CouncilSystem(budget=budget, enforce_budget=enforce, log=lambda m: typer.echo(f"  • {m}"))
-    typer.echo(f"Mode: {'ONLINE' if system.online else 'OFFLINE (simulation)'}")
     result = system.run(task)
 
     if json_output:

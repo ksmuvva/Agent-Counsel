@@ -1,28 +1,28 @@
 # Multi-Agent Council System Design
 
 ## 1. Introduction
-This document outlines the architectural design for the Multi-Agent Council system, which will leverage the Claude Code Agent SDK. The system aims to provide a robust and flexible framework for complex task execution through collaborative AI agents, featuring a dual user interface (CLI and Streamlit).
+This document describes the architecture of the Multi-Agent Council system: a framework that coordinates Council, Operational and on-demand SME agents through a structured pipeline and a schema-based tool layer, with both CLI and Streamlit front-ends.
 
 ## 2. Core Components
 
 ### 2.1 Agent SDK
-- **Claude Code Agent SDK**: The foundational SDK for building and managing agents. We will integrate with the `claude-agent-sdk-python` library.
+- **Claude Code Agent SDK**: foundation for building and running agents. The runtime wraps the official `anthropic` SDK. There is **no offline simulator** — `LLMClient` requires the `anthropic` package and `ANTHROPIC_API_KEY` and raises `LLMUnavailableError` if either is missing. Pure unit tests (heuristics, cost arithmetic, schema validation, file I/O) run without a key; integration tests that hit the real API are skipped when no key is set.
 
 ### 2.2 Agent Types
-- **Permanent Agents**: 15 agents (3 Council, 12 Operational) with predefined roles and models (Opus/Sonnet).
+- **Permanent Agents**: 15 agents (3 Council, 12 Operational) with predefined roles and models (Opus / Sonnet).
 - **Dynamic SME Personas**: 10+ on-demand domain experts with specific skills.
 
 ### 2.3 Key Features
-- **Phase Execution Pipeline**: Structured workflow with Council consultation.
-- **Self-Play Debate**: Multi-perspective reasoning with tiebreaker.
-- **Verdict Matrix**: Quality gate with automatic revision triggering.
-- **5 Ensemble Patterns**: Pre-configured agent collaborations.
-- **Multi-Modal I/O**: Support for text, images, documents (Excel, Word, PPT), and code files.
-- **Cost Tracking**: Budget enforcement with real-time monitoring.
+- **Phase Execution Pipeline**: structured workflow with Council consultation.
+- **Self-Play Debate**: multi-perspective reasoning with a tiebreaker.
+- **Verdict Matrix**: quality gate with automatic revision triggering.
+- **Ensemble Patterns**: pre-configured agent collaborations (chain / parallel-vote).
+- **Multi-Modal I/O**: text, documents (Excel, Word, PPT), diagrams (Mermaid, PlantUML).
+- **Cost Tracking**: per-call accounting and optional budget enforcement.
 
 ### 2.4 User Interfaces
-- **CLI (Typer)**: For command-line interaction and automation.
-- **Streamlit Web Interface**: For interactive web-based control and visualization.
+- **CLI (Typer)**: command-line interaction and automation.
+- **Streamlit Web UI**: interactive web-based control and visualisation.
 
 ## 3. System Architecture Overview
 
@@ -34,137 +34,142 @@ graph TD
     CLI --> Orchestrator[Orchestrator Agent]
     Streamlit --> Orchestrator
 
-    Orchestrator --> StrategicCouncil[Strategic Council Agents]
+    Orchestrator --> StrategicCouncil[Strategic Council]
     Orchestrator --> OperationalAgents[Operational Agents]
     Orchestrator --> SMEPersonas[Dynamic SME Personas]
 
-    StrategicCouncil --> DomainCouncilChair
-    StrategicCouncil --> QualityArbiter
-    StrategicCouncil --> EthicsSafetyAdvisor
-
-    OperationalAgents --> TaskAnalyst
-    OperationalAgents --> Planner
-    OperationalAgents --> Clarifier
-    OperationalAgents --> Researcher
-    OperationalAgents --> Executor
-    OperationalAgents --> CodeReviewer
-    OperationalAgents --> Formatter
-    OperationalAgents --> Verifier
-    OperationalAgents --> Critic
-    OperationalAgents --> Reviewer
-    OperationalAgents --> MemoryCurator
-
-    SMEPersonas --> IAMArchitect
-    SMEPersonas --> CloudArchitect
-    SMEPersonas --> SecurityAnalyst
-    SMEPersonas --> DataEngineer
-    SMEPersonas --> AIMLEngineer
-    SMEPersonas --> TestEngineer
-    SMEPersonas --> BusinessAnalyst
-    SMEPersonas --> TechnicalWriter
-    SMEPersonas --> DevOpsEngineer
-    SMEPersonas --> FrontendDeveloper
-
-    Orchestrator -- Manages --> PhaseExecutionPipeline
+    Orchestrator -- manages --> PhaseExecutionPipeline
     PhaseExecutionPipeline --> SelfPlayDebate
     PhaseExecutionPipeline --> VerdictMatrix
     PhaseExecutionPipeline --> EnsemblePatterns
 
-    Orchestrator -- Utilizes --> ToolRegistry[Tool Registry]
-    Orchestrator -- Tracks --> CostTracker[Cost Tracker]
+    Orchestrator -- uses --> Runtime[Runtime]
+    Runtime --> LLMClient
+    Runtime --> CostTracker
+    Runtime --> ToolRegistry
 
-    ToolRegistry --> WebSearch[Web Search Tool]
-    ToolRegistry --> DocumentTools[Document Tools (Excel, Word, PPT)]
-    ToolRegistry --> CodeFiles[Code File Tools]
-    ToolRegistry --> ImageTools[Image Tools]
+    ToolRegistry --> ReasoningTools[Reasoning Tools]
+    ToolRegistry --> DiagramTools[Diagram Tools (Mermaid / PlantUML)]
+    ToolRegistry --> DocumentTools[Document Tools (Excel / Word / PPT)]
+    ToolRegistry --> WebSearchTool[Web Search Tool]
 
-    AllAgents[All Agents] -- Access --> ToolRegistry
-    AllAgents -- Report to --> CostTracker
-    AllAgents -- Interact via --> MultiModalIO[Multi-Modal I/O]
+    AllAgents[All Agents] -- resolve via --> ToolRegistry
+    AllAgents -- report to --> CostTracker
 ```
 
-## 4. Core Framework Implementation
+## 4. Core Framework
 
-The foundational components for the agent system have been laid out in the `src/core` directory:
+Located in `src/core/`:
 
-- **`base_agent.py`**: Defines the `BaseAgent` abstract class, providing a common interface for all agents, including methods for adding tools and running tasks. All specific agents will inherit from this class.
-- **`model_router.py`**: Manages the mapping of agent roles to specific LLM models (e.g., Opus, Sonnet). This allows for flexible model assignment and easy updates.
-- **`tool_registry.py`**: A central repository for registering and retrieving tools that agents can utilize. This ensures discoverability and standardized access to external functionalities like web search or document processing.
-- **`cost_tracker.py`**: Implements functionality to monitor and record the costs associated with agent operations, providing real-time budget enforcement and reporting.
-- **`claude_agent.py`**: Provides a wrapper for integrating with the Claude Code Agent SDK, allowing agents to leverage Claude's capabilities.
-- **`agent_factory.py`**: A factory class for creating agent instances based on their roles and configurations, using the `ModelRouter` to assign appropriate LLM models.
+- **`base_agent.py`** — `BaseAgent` abstract class; common `run(task, context)` interface and a `tools` list.
+- **`claude_agent.py`** — concrete agent backed by `LLMClient`; records token usage against `CostTracker`.
+- **`model_router.py`** — maps roles to model IDs (Opus / Sonnet).
+- **`agent_factory.py`** — instantiates agents from role configs via `ModelRouter`.
+- **`llm_client.py`** — wraps the Anthropic SDK. Real-only: constructor raises `LLMUnavailableError` if the SDK is not installed or `ANTHROPIC_API_KEY` is not set. Retries with exponential backoff via tenacity.
+- **`cost_tracker.py`** — per-call price accounting with optional budget enforcement (`BudgetExceededError`).
+- **`runtime.py`** — singleton holding the shared `LLMClient`, `CostTracker` and `ToolRegistry`. Agents read from `Runtime.get()` instead of receiving each dependency through their constructor.
+- **`tool_registry.py`** — name-keyed registry of schema-based tools; can hand specs to Claude's tool-use API via `anthropic_tool_specs()`.
+- **`pipeline.py`** — `PhaseExecutionPipeline`, `SelfPlayDebate`, `VerdictMatrix`, `EnsemblePatterns`.
+- **`system.py`** — `CouncilSystem` glues the runtime, agents and pipeline together.
 
 ## 5. Agent Implementations
 
-### 5.1 Strategic Council Agents
+### 5.1 Strategic Council (`src/agents/strategic_council.py`)
+- **Domain Council Chair** — SME selection & governance.
+- **Quality Arbiter** — quality standard setting & tiebreaker.
+- **Ethics & Safety Advisor** — bias, PII, compliance review.
 
-Implemented in `src/agents/strategic_council.py`, these agents are responsible for high-level governance and decision-making:
-- **Domain Council Chair**: SME selection & governance.
-- **Quality Arbiter**: Quality standard setting & tiebreaker.
-- **Ethics & Safety Advisor**: Bias, PII, compliance review.
+### 5.2 Operational Agents (`src/agents/operational_agents.py`)
+Orchestrator, Task Analyst, Planner, Clarifier, Researcher, Executor, Code Reviewer, Formatter, Verifier, Critic, Reviewer, Memory Curator.
 
-### 5.2 Operational Agents
+### 5.3 Dynamic SME Personas (`src/agents/sme_personas.py`)
+`SMEPersonaManager` instantiates SMEs on demand from a predefined catalogue (Cloud Architect, IAM Architect, Security Analyst, Data Engineer, AI/ML Engineer, etc.).
 
-Implemented in `src/agents/operational_agents.py`, these agents handle the execution of tasks:
-- **Orchestrator**: Parent agent, tier classification, coordination.
-- **Task Analyst**: Task decomposition & requirements analysis.
-- **Planner**: Execution planning & sequencing.
-- **Clarifier**: Question formulation for missing requirements.
-- **Researcher**: Evidence gathering & web research.
-- **Executor**: Solution generation with Tree of Thoughts.
-- **Code Reviewer**: Security, performance, style review.
-- **Formatter**: Multi-format output generation.
-- **Verifier**: Hallucination detection & fact-checking.
-- **Critic**: Adversarial attack (5 vectors).
-- **Reviewer**: Final quality gate.
-- **Memory Curator**: Knowledge extraction & persistence.
-
-### 5.3 Dynamic SME Personas
-
-Implemented in `src/agents/sme_personas.py`, this system allows for on-demand instantiation of specialized domain experts:
-- **SMEPersona**: Base class for dynamic SME agents.
-- **SMEPersonaManager**: Manages the creation and retrieval of SME personas based on predefined configurations.
-
-## 6. Advanced Features Implementation
-
-Implemented in `src/core/pipeline.py`, these components provide sophisticated control over agent collaboration and task execution:
-- **Phase Execution Pipeline**: Defines a structured workflow for task execution, incorporating various phases and agent consultations.
-- **Self-Play Debate**: Facilitates multi-perspective reasoning among agents, with a `QualityArbiter` acting as a tiebreaker.
-- **Verdict Matrix**: Acts as a quality gate, evaluating agent outputs against predefined standards and triggering revisions if necessary.
-- **Ensemble Patterns**: Placeholder for pre-configured agent collaboration strategies.
+## 6. Advanced Pipeline Features (`src/core/pipeline.py`)
+- **PhaseExecutionPipeline** — orchestrates phases (Analysis, Planning, Execution, Review, Final Verdict) with Council consultation gated by task tier.
+- **SelfPlayDebate** — agents argue opposing positions; `QualityArbiter` arbitrates.
+- **VerdictMatrix** — weighted quality gate (completeness / correctness / clarity / safety) computed from structural signals. `arbiter_score()` additionally delegates to the real Quality Arbiter agent for deep semantic scoring.
+- **EnsemblePatterns** — built-in collaboration shapes (chain, parallel-vote) for reuse across tasks.
 
 ## 7. User Interfaces
 
-### 7.1 CLI (Typer)
+### 7.1 CLI (`src/cli/cli.py`)
+Typer commands for running tasks, listing agents/personas, and inspecting cost.
 
-Implemented in `src/cli/cli.py`, providing command-line access to the system:
-- Commands for running tasks, listing agents and personas, and managing costs.
+### 7.2 Streamlit Web UI (`src/ui/streamlit_app.py`)
+Dashboard, task runner with agent selection, agent management view, cost tracker view.
 
-### 7.2 Streamlit Web Interface
+## 8. Tool Layer
 
-Implemented in `src/ui/streamlit_app.py`, offering an interactive web-based control panel:
-- Dashboard for system overview.
-- Interface for running tasks and selecting agents.
-- Agent management and cost tracking views.
+All tools implement the same contract and are wired into the runtime via `default_registry()` (`src/tools/__init__.py`).
 
-## 8. Tool Integration
+### 8.1 `Tool` contract (`src/tools/base.py`)
+Every tool declares:
 
-Implemented in `src/tools/document_tools.py`, providing agents with external capabilities:
-- **DocumentTools**: Mock implementations for interacting with Excel, Word, and PowerPoint files.
-- **WebSearchTool**: Mock implementation for conducting web searches.
+- `name` — unique snake_case identifier used by the registry and Claude.
+- `description` — one-line summary the model sees when picking tools.
+- `input_schema` — JSON Schema describing the keyword arguments of `execute`.
+- `execute(**kwargs)` — the actual implementation.
 
-## 9. Development Environment Setup
+`Tool.run(**kwargs)` validates inputs against the schema via `jsonschema` and raises `ToolError` on mismatch. `Tool.as_anthropic_tool()` returns the same metadata in the shape Claude's tool-use API expects, so a single declaration drives both local dispatch and remote tool-use.
 
-- **Python 3.10+**
-- **Claude Code Agent SDK**
-- **Streamlit**
-- **Typer**
-- **LLM API Keys** (Anthropic, OpenAI, Google, etc.)
+### 8.2 `ToolRegistry` (`src/core/tool_registry.py`)
+- `register_tool(tool)` / `register_many([...])` — name is read from `tool.name`.
+- `get_tool(name)` / `invoke(name, **kwargs)` — name-keyed lookup and dispatch.
+- `anthropic_tool_specs()` — list of specs to hand to Claude when an agent should be allowed to call tools.
 
-## 10. Next Steps
+The registry is built lazily by `Runtime` and is reachable from any agent via `Runtime.get().tools`.
 
-1.  Thoroughly test the entire system, including agent interactions, pipeline execution, and UI functionalities.
-2.  Refine mock implementations of tools with actual integrations (e.g., real web search, document parsing libraries).
-3.  Implement the 5 Ensemble Patterns for agent collaborations.
-4.  Commit all developed code and documentation to the GitHub repository.
-5.  Deliver the final project and documentation to the user.
+### 8.3 Built-in tools
+
+**Reasoning** (`src/tools/reasoning_tools.py`)
+| Tool | Purpose |
+| --- | --- |
+| `chain_of_thought` | Numbered CoT walkthrough ending with an `Answer:` line. |
+| `tree_of_thoughts` | Generates N branches, scores each, recommends the best. |
+| `verify_claim` | Skeptical fact-check of a claim against supplied evidence; returns `verdict / confidence / reason`. |
+| `decompose_task` | Breaks a task into ordered subtasks with dependencies and outcomes. |
+
+**Documents** (`src/tools/document_tools.py`)
+| Tool | Backed by |
+| --- | --- |
+| `excel_read` / `excel_write` | `openpyxl` |
+| `word_read` / `word_write` | `python-docx` |
+| `powerpoint_read` / `powerpoint_write` | `python-pptx` |
+
+Missing optional dependencies raise `MissingDependencyError` with an install hint — no silent fakes.
+
+**Diagrams (HLD / LLD)** (`src/tools/diagram_tools.py`)
+| Tool | Purpose |
+| --- | --- |
+| `mermaid_hld` | Draft a Mermaid HLD (`flowchart` or `C4Container`) from a description. |
+| `mermaid_lld` | Draft a Mermaid LLD (`sequenceDiagram` / `classDiagram` / `stateDiagram` / `erDiagram`). |
+| `plantuml_lld` | Draft a PlantUML LLD (sequence / class / component / state). |
+| `mermaid_validate` | Header / structure check on arbitrary Mermaid source. |
+| `diagram_save` | Validate then persist Mermaid (`.mmd`) or PlantUML (`.puml`) source to disk. |
+
+Generation tools produce *source* only; rendering to images is delegated to whichever toolchain the caller prefers (`mermaid-cli`, `plantuml.jar`, etc.).
+
+**Web research** (`src/tools/document_tools.py`)
+| Tool | Backed by |
+| --- | --- |
+| `web_search` | Tavily API (requires `TAVILY_API_KEY`); raises `ToolError` if absent. |
+
+### 8.4 Adding a new tool
+1. Subclass `Tool` and set `name`, `description`, `input_schema`.
+2. Implement `execute(**kwargs)`.
+3. Register it in `tools.default_registry()` (or call `runtime.tools.register_tool(...)` at runtime).
+That's it — the registry, schema validation and Claude tool-use spec come for free.
+
+## 9. Development Environment
+- Python 3.10+
+- **Required**: `anthropic` + `ANTHROPIC_API_KEY` — the system is real-only.
+- Optional: `openpyxl` / `python-docx` / `python-pptx` (document tools), `requests` + `TAVILY_API_KEY` (web search), `mermaid-cli` / `plantuml.jar` (diagram rendering).
+- Streamlit, Typer.
+
+## 10. Roadmap
+1. Image tools (vision + OCR) for the multi-modal pipeline.
+2. Code-file tools (read / patch / lint) for the Code Reviewer agent.
+3. Optional renderers for `diagram_save` (`mermaid-cli`, `plantuml.jar`) to emit SVG/PNG alongside source.
+4. Tool-use loop in `ClaudeAgent` that exposes `runtime.tools.anthropic_tool_specs()` to the model and dispatches tool calls automatically.
+5. Persistent memory store fed by the Memory Curator.

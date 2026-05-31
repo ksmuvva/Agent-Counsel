@@ -7,8 +7,6 @@ from core import CouncilSystem
 def main():
     print("Initializing Multi-Agent Council System...")
     system = CouncilSystem(budget=20.0)
-    mode = "ONLINE (Claude API)" if system.online else "OFFLINE (simulation)"
-    print(f"Mode: {mode}\n")
 
     task = "Develop a comprehensive market analysis report for a new SaaS product."
     print(f"Executing task: {task}\n")

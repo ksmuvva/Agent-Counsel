@@ -4,7 +4,6 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 
 from .cost_tracker import CostTracker
-from .llm_client import LLMClient
 from .pipeline import PhaseExecutionPipeline, PipelineResult
 from .runtime import Runtime
 
@@ -29,7 +28,7 @@ class CouncilSystem:
         from agents.sme_personas import SMEPersonaManager
 
         cost_tracker = CostTracker(budget=budget, enforce=enforce_budget)
-        Runtime.configure(client=LLMClient(), cost_tracker=cost_tracker)
+        Runtime.configure(cost_tracker=cost_tracker)
 
         self.orchestrator = Orchestrator()
         self.council: List[Any] = [
@@ -44,10 +43,6 @@ class CouncilSystem:
             sme_manager=self.sme_manager,
             log=log,
         )
-
-    @property
-    def online(self) -> bool:
-        return Runtime.get().client.online
 
     @property
     def cost_tracker(self) -> CostTracker:
