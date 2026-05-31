@@ -1,16 +1,29 @@
-"""Multi-modal document tools.
+"""Document I/O tools (Excel, Word, PowerPoint).
 
 Real implementations backed by openpyxl / python-docx / python-pptx. Each
-method degrades to a clear, actionable error if the optional dependency is not
-installed, rather than silently returning mock data.
+method raises :class:`MissingDependencyError` with an actionable message when
+the optional library is not installed, rather than silently faking data.
+
+Two surfaces are provided:
+
+* :class:`DocumentTools` — a thin static-method helper for direct Python use.
+* Per-format :class:`~tools.base.Tool` subclasses (e.g. ``ExcelReadTool``)
+  that agents can invoke through the schema-based ``ToolRegistry``.
 """
+from __future__ import annotations
+
 from typing import Any, Dict, List
+
+from .base import Tool, ToolError
 
 
 class MissingDependencyError(RuntimeError):
     """Raised when an optional document library is not installed."""
 
 
+# ---------------------------------------------------------------------------
+# Static helper (kept for direct Python use and backwards compatibility).
+# ---------------------------------------------------------------------------
 class DocumentTools:
     """Read and write common office document formats."""
 
@@ -111,28 +124,155 @@ class DocumentTools:
         return path
 
 
-class WebSearchTool:
-    """Web research tool.
+# ---------------------------------------------------------------------------
+# Schema-based tool wrappers.
+# ---------------------------------------------------------------------------
+class ExcelReadTool(Tool):
+    name = "excel_read"
+    description = (
+        "Read every sheet of an Excel workbook (.xlsx) and return its cells "
+        "as a dict mapping sheet name to a list of rows."
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Filesystem path to the .xlsx file."}
+        },
+        "required": ["path"],
+        "additionalProperties": False,
+    }
 
-    Uses the Tavily API when ``TAVILY_API_KEY`` is set; otherwise raises so the
-    caller can decide how to proceed instead of returning fabricated results.
-    """
+    def execute(self, *, path: str) -> Dict[str, List[List[Any]]]:
+        return DocumentTools.read_excel(path)
+
+
+class ExcelWriteTool(Tool):
+    name = "excel_write"
+    description = "Write rows to a single-sheet Excel workbook (.xlsx)."
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "rows": {
+                "type": "array",
+                "items": {"type": "array"},
+                "description": "List of rows; each row is a list of cell values.",
+            },
+            "sheet_name": {"type": "string", "default": "Sheet1"},
+        },
+        "required": ["path", "rows"],
+        "additionalProperties": False,
+    }
+
+    def execute(self, *, path: str, rows: List[List[Any]], sheet_name: str = "Sheet1") -> str:
+        return DocumentTools.write_excel(path, rows, sheet_name)
+
+
+class WordReadTool(Tool):
+    name = "word_read"
+    description = "Read a Word document (.docx) and return its body text."
+    input_schema = {
+        "type": "object",
+        "properties": {"path": {"type": "string"}},
+        "required": ["path"],
+        "additionalProperties": False,
+    }
+
+    def execute(self, *, path: str) -> str:
+        return DocumentTools.read_word(path)
+
+
+class WordWriteTool(Tool):
+    name = "word_write"
+    description = "Write paragraphs to a Word document (.docx). Newlines become paragraph breaks."
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "content": {"type": "string"},
+        },
+        "required": ["path", "content"],
+        "additionalProperties": False,
+    }
+
+    def execute(self, *, path: str, content: str) -> str:
+        return DocumentTools.write_word(path, content)
+
+
+class PowerPointReadTool(Tool):
+    name = "powerpoint_read"
+    description = "Read a PowerPoint deck (.pptx) and return a list of slide texts."
+    input_schema = {
+        "type": "object",
+        "properties": {"path": {"type": "string"}},
+        "required": ["path"],
+        "additionalProperties": False,
+    }
+
+    def execute(self, *, path: str) -> List[str]:
+        return DocumentTools.read_powerpoint(path)
+
+
+class PowerPointWriteTool(Tool):
+    name = "powerpoint_write"
+    description = "Write a PowerPoint deck (.pptx) from a list of {title, body} slides."
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "slides": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "body": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["path", "slides"],
+        "additionalProperties": False,
+    }
+
+    def execute(self, *, path: str, slides: List[Dict[str, str]]) -> str:
+        return DocumentTools.write_powerpoint(path, slides)
+
+
+# ---------------------------------------------------------------------------
+# Web search.
+# ---------------------------------------------------------------------------
+class WebSearchTool(Tool):
+    """Web research tool, backed by Tavily when ``TAVILY_API_KEY`` is set."""
 
     name = "web_search"
+    description = (
+        "Search the public web and return up to N {title, url, content} results. "
+        "Requires TAVILY_API_KEY."
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "minLength": 1},
+            "max_results": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    }
 
-    @staticmethod
-    def search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
+    def execute(self, *, query: str, max_results: int = 5) -> List[Dict[str, str]]:
         import os
 
         api_key = os.getenv("TAVILY_API_KEY")
         if not api_key:
-            raise MissingDependencyError(
+            raise ToolError(
                 "Web search requires TAVILY_API_KEY (or wire in your own provider)."
             )
         try:
             import requests
         except ImportError as exc:  # pragma: no cover
-            raise MissingDependencyError(
+            raise ToolError(
                 "requests is required for web search (pip install requests)."
             ) from exc
         resp = requests.post(
