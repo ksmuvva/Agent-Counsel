@@ -77,6 +77,57 @@ def test_agents_are_granted_real_tools():
     assert set(DOCUMENT_TOOL_NAMES).issubset(set(executor().allowed_tools))
 
 
+@pytest.mark.asyncio
+async def test_pipeline_retries_then_degrades_on_agent_failure():
+    """A failing agent is retried once, then the pipeline continues with a
+    placeholder and records the failure instead of aborting the whole run."""
+    from core.cost_tracker import CostTracker
+    from core.pipeline import PhaseExecutionPipeline
+
+    pipeline = PhaseExecutionPipeline(CostTracker(budget=5.0))
+
+    calls = {"n": 0}
+
+    class AlwaysFails:
+        name = "Flaky Agent"
+
+        async def run(self, task, context=None, **kwargs):
+            calls["n"] += 1
+            return AgentResult(text="[agent error: timeout]", cost_usd=0.0,
+                               num_turns=0, duration_ms=0, is_error=True)
+
+    text = await pipeline._run(AlwaysFails(), "do something")
+    assert calls["n"] == 2  # original + one retry
+    assert "Flaky Agent unavailable" in text
+    assert "Flaky Agent" in pipeline.failures
+
+
+@pytest.mark.asyncio
+async def test_pipeline_retry_succeeds_second_time():
+    """If the retry succeeds, its output is used and no failure is recorded."""
+    from core.cost_tracker import CostTracker
+    from core.pipeline import PhaseExecutionPipeline
+
+    pipeline = PhaseExecutionPipeline(CostTracker(budget=5.0))
+    calls = {"n": 0}
+
+    class FailsThenWorks:
+        name = "Recoverable Agent"
+
+        async def run(self, task, context=None, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return AgentResult(text="[agent error: timeout]", cost_usd=0.0,
+                                   num_turns=0, duration_ms=0, is_error=True)
+            return AgentResult(text="recovered output", cost_usd=0.01,
+                               num_turns=1, duration_ms=10, is_error=False)
+
+    text = await pipeline._run(FailsThenWorks(), "do something")
+    assert calls["n"] == 2
+    assert text == "recovered output"
+    assert pipeline.failures == []
+
+
 def test_persona_manager():
     mgr = SMEPersonaManager()
     assert len(mgr.list_available()) == 10

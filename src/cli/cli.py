@@ -31,6 +31,8 @@ def run(
             typer.echo(f"\nTier: {result.tier} | Passed: {result.passed}")
             if result.selected_personas:
                 typer.echo(f"SME personas: {', '.join(result.selected_personas)}")
+            if result.failed_agents:
+                typer.echo(f"Degraded (failed) agents: {', '.join(result.failed_agents)}")
             typer.echo("\n=== Final Verdict ===")
             typer.echo(result.final_output)
         typer.echo("\n=== Cost (real, from SDK) ===")

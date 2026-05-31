@@ -38,6 +38,7 @@ class PipelineResult:
     selected_personas: List[str] = field(default_factory=list)
     passed: bool = False
     final_output: str = ""
+    failed_agents: List[str] = field(default_factory=list)
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -47,6 +48,7 @@ class PipelineResult:
             "phases": self.phases,
             "passed": self.passed,
             "final_output": self.final_output,
+            "failed_agents": self.failed_agents,
         }
 
 
@@ -76,19 +78,40 @@ class PhaseExecutionPipeline:
         self.tool_server = build_tool_server()
         self._servers = {"council_tools": self.tool_server}
         self._log = log or (lambda msg: None)
+        self.failures: List[str] = []
 
     async def _run(self, agent: Agent, task: str, context=None) -> str:
+        """Run an agent, retrying once on failure, then degrading gracefully.
+
+        If the agent times out or errors, we retry it once with a fresh call.
+        If it still fails, we record the failure and return a placeholder so the
+        rest of the pipeline can continue instead of one stuck agent aborting
+        the whole run.
+        """
         result = await agent.run(
             task,
             context=context,
             mcp_servers=self._servers,
             cost_tracker=self.cost_tracker,
         )
+        if result.is_error:
+            self._log(f"{agent.name} failed ({result.text[:80]}); retrying once")
+            result = await agent.run(
+                task,
+                context=context,
+                mcp_servers=self._servers,
+                cost_tracker=self.cost_tracker,
+            )
+        if result.is_error:
+            self.failures.append(agent.name)
+            self._log(f"{agent.name} failed after retry; continuing with placeholder")
+            return f"[{agent.name} unavailable: {result.text}]"
         if result.tools_used:
             self._log(f"{agent.name} used tools: {', '.join(result.tools_used)}")
         return result.text
 
     async def run(self, task: str) -> PipelineResult:
+        self.failures = []
         # Phase 0: tier classification (a real agent decision)
         tier_text = await self._run(orchestrator(), task)
         tier = _parse_tier(tier_text)
@@ -162,4 +185,5 @@ class PhaseExecutionPipeline:
         result.passed = _parse_verdict(final)
         result.phases["Final Verdict"] = final
         result.final_output = final
+        result.failed_agents = list(self.failures)
         return result

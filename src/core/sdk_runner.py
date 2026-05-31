@@ -114,17 +114,17 @@ async def invoke_agent(
             usage=result_msg.usage or {},
         )
 
-    # No ResultMessage (e.g. the stream raised). Degrade gracefully if we have
-    # partial text; otherwise re-raise so genuine failures are not hidden.
+    # No ResultMessage (e.g. the stream raised or timed out). Degrade rather
+    # than raise: return an error result carrying any partial text (or the
+    # error message), so the orchestrator can retry and/or continue instead of
+    # one stuck agent aborting the whole pipeline.
     partial = "\n".join(text_parts).strip()
-    if partial:
-        return AgentResult(
-            text=partial,
-            cost_usd=0.0,
-            num_turns=0,
-            duration_ms=0,
-            tools_used=tools_used,
-            is_error=True,
-            model=model,
-        )
-    raise RuntimeError(stream_error or "Agent run produced no ResultMessage from the SDK.")
+    return AgentResult(
+        text=partial or f"[agent error: {stream_error or 'no result from SDK'}]",
+        cost_usd=0.0,
+        num_turns=0,
+        duration_ms=0,
+        tools_used=tools_used,
+        is_error=True,
+        model=model,
+    )
