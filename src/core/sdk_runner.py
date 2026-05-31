@@ -73,27 +73,47 @@ async def invoke_agent(
     tools_used: List[str] = []
     result_msg: Optional[ResultMessage] = None
 
-    async for message in query(prompt=prompt, options=options):
-        if isinstance(message, AssistantMessage):
-            for block in message.content:
-                if isinstance(block, TextBlock):
-                    text_parts.append(block.text)
-                elif isinstance(block, ToolUseBlock):
-                    tools_used.append(block.name)
-        elif isinstance(message, ResultMessage):
-            result_msg = message
+    # If the model exhausts its turn budget the SDK raises mid-stream; we still
+    # want whatever text/tool activity accumulated rather than failing the whole
+    # pipeline, so we capture it and mark the result as an error.
+    stream_error: Optional[str] = None
+    try:
+        async for message in query(prompt=prompt, options=options):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        text_parts.append(block.text)
+                    elif isinstance(block, ToolUseBlock):
+                        tools_used.append(block.name)
+            elif isinstance(message, ResultMessage):
+                result_msg = message
+    except Exception as exc:  # noqa: BLE001 - surfaced via AgentResult.is_error
+        stream_error = str(exc)
 
-    if result_msg is None:
-        raise RuntimeError("Agent run produced no ResultMessage from the SDK.")
+    if result_msg is not None:
+        final_text = result_msg.result or "\n".join(text_parts).strip()
+        return AgentResult(
+            text=final_text,
+            cost_usd=result_msg.total_cost_usd or 0.0,
+            num_turns=result_msg.num_turns,
+            duration_ms=result_msg.duration_ms,
+            tools_used=tools_used,
+            is_error=result_msg.is_error,
+            model=model,
+            usage=result_msg.usage or {},
+        )
 
-    final_text = result_msg.result or "\n".join(text_parts).strip()
-    return AgentResult(
-        text=final_text,
-        cost_usd=result_msg.total_cost_usd or 0.0,
-        num_turns=result_msg.num_turns,
-        duration_ms=result_msg.duration_ms,
-        tools_used=tools_used,
-        is_error=result_msg.is_error,
-        model=model,
-        usage=result_msg.usage or {},
-    )
+    # No ResultMessage (e.g. the stream raised). Degrade gracefully if we have
+    # partial text; otherwise re-raise so genuine failures are not hidden.
+    partial = "\n".join(text_parts).strip()
+    if partial:
+        return AgentResult(
+            text=partial,
+            cost_usd=0.0,
+            num_turns=0,
+            duration_ms=0,
+            tools_used=tools_used,
+            is_error=True,
+            model=model,
+        )
+    raise RuntimeError(stream_error or "Agent run produced no ResultMessage from the SDK.")
