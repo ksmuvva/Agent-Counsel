@@ -65,10 +65,10 @@ uvicorn==0.48.0
 watchdog==6.0.0
 websockets==16.0
 
-# Claude API (optional; enables online mode)
+# Claude API (required — the system is real-only and fails fast without it)
 anthropic
 
-# Document tooling (optional; enables real Excel/Word/PPT I/O)
+# Document tooling (optional; required only if you call the Excel/Word/PPT tools)
 openpyxl
 python-docx
 python-pptx

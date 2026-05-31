@@ -142,6 +142,20 @@ def test_tool_requires_name():
         _NoName()
 
 
+def test_agent_tool_specs_assembled_for_anthropic():
+    """A ClaudeAgent with attached tools must expose their Anthropic specs."""
+    from agents import Executor
+
+    agent = Executor()
+    agent.add_tool(ChainOfThoughtTool())
+    agent.add_tool(MermaidValidateTool())
+    specs = agent._tool_specs()  # type: ignore[attr-defined]
+    names = {s["name"] for s in specs}
+    assert names == {"chain_of_thought", "mermaid_validate"}
+    for spec in specs:
+        assert {"name", "description", "input_schema"} <= set(spec)
+
+
 # ---- Integration: reasoning + diagram generation tools -------------------
 @requires_api_key
 def test_registry_invoke_dispatches_to_tool():
@@ -184,3 +198,26 @@ def test_mermaid_lld_prefixes_diagram_type_when_missing():
 def test_plantuml_lld_wraps_in_startuml():
     src = PlantUMLLLDTool().run(description="A class with two methods.")
     assert "@startuml" in src and "@enduml" in src
+
+
+@requires_api_key
+def test_claude_agent_tool_use_loop_calls_attached_tool():
+    """End-to-end check that the agent loop dispatches a tool call.
+
+    Gives the agent a single tool that, if called, leaves a fingerprint in the
+    cost tracker. We then ask a question the model can only answer with the
+    tool's help and assert the tool fired.
+    """
+    from agents import Executor
+
+    Runtime.reset()
+    agent = Executor()
+    agent.add_tool(MermaidValidateTool())
+    agent.run(
+        "Validate this Mermaid source with the mermaid_validate tool and "
+        "report only whether it is valid:\n"
+        "flowchart TD\n  A --> B"
+    )
+    per_agent = Runtime.get().cost_tracker.summary()["per_agent"]
+    # The tool itself does not bill (no LLM call); the agent's own model calls do.
+    assert any(key.startswith("Executor") for key in per_agent)

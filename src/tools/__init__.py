@@ -63,8 +63,8 @@ def default_registry():
 __all__ = [
     "Tool",
     "ToolError",
-    "DocumentTools",
     "MissingDependencyError",
+    "DocumentTools",
     "ExcelReadTool",
     "ExcelWriteTool",
     "WordReadTool",
