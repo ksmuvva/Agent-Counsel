@@ -8,6 +8,7 @@ an agent requires a working Claude Agent SDK environment (an authenticated
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -44,12 +45,16 @@ async def invoke_agent(
     mcp_servers: Optional[Dict[str, McpSdkServerConfig]] = None,
     allowed_tools: Optional[List[str]] = None,
     max_turns: int = 8,
+    timeout_s: float = 180.0,
 ) -> AgentResult:
     """Run a single agent to completion and return its real result.
 
     The model autonomously decides whether and how to call the supplied tools;
     we surface which tools were actually invoked, the real USD cost, and the
     number of reasoning turns reported by the SDK.
+
+    ``timeout_s`` bounds a single agent run so one stuck call cannot stall the
+    whole pipeline; on timeout we return any partial text with ``is_error=True``.
     """
     granted = allowed_tools or []
     # Sandbox each council agent to ONLY its own tools:
@@ -73,11 +78,8 @@ async def invoke_agent(
     tools_used: List[str] = []
     result_msg: Optional[ResultMessage] = None
 
-    # If the model exhausts its turn budget the SDK raises mid-stream; we still
-    # want whatever text/tool activity accumulated rather than failing the whole
-    # pipeline, so we capture it and mark the result as an error.
-    stream_error: Optional[str] = None
-    try:
+    async def _consume() -> None:
+        nonlocal result_msg
         async for message in query(prompt=prompt, options=options):
             if isinstance(message, AssistantMessage):
                 for block in message.content:
@@ -87,6 +89,15 @@ async def invoke_agent(
                         tools_used.append(block.name)
             elif isinstance(message, ResultMessage):
                 result_msg = message
+
+    # The SDK raises mid-stream if the model exhausts its turn budget, and a
+    # single call can hang; in both cases we still want whatever accumulated
+    # rather than failing the whole pipeline, so we capture it as an error.
+    stream_error: Optional[str] = None
+    try:
+        await asyncio.wait_for(_consume(), timeout=timeout_s)
+    except asyncio.TimeoutError:
+        stream_error = f"Agent run exceeded {timeout_s:.0f}s timeout."
     except Exception as exc:  # noqa: BLE001 - surfaced via AgentResult.is_error
         stream_error = str(exc)
 
