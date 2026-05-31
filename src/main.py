@@ -21,7 +21,10 @@ async def _main() -> None:
     print(f"\nTier: {result.tier}")
     if result.selected_personas:
         print(f"Selected SME personas: {', '.join(result.selected_personas)}")
-    print(f"Passed quality gate: {result.passed}\n")
+    print(f"Passed quality gate: {result.passed}")
+    if result.failed_agents:
+        print(f"Agents that failed (degraded): {', '.join(result.failed_agents)}")
+    print()
     print("=== Final Verdict ===")
     print(result.final_output)
 
