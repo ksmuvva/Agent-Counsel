@@ -148,7 +148,7 @@ class PhaseExecutionPipeline:
             critic(), f"Attack this solution:\n{solution}", context
         )
         verification = await self._run(
-            verifier(), f"Verify this solution for factual accuracy:\n{solution}"
+            verifier(), f"Verify this solution for factual accuracy:\n{solution}", context
         )
         result.phases["Review"] = {"critique": critique, "verification": verification}
 
