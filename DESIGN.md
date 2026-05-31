@@ -6,7 +6,7 @@ This document describes the architecture of the Multi-Agent Council system: a fr
 ## 2. Core Components
 
 ### 2.1 Agent SDK
-- **Claude Code Agent SDK**: foundation for building and running agents. The runtime wraps the official `anthropic` SDK when an API key is present and falls back to a deterministic offline simulator otherwise, so the full pipeline is testable without credentials.
+- **Claude Code Agent SDK**: foundation for building and running agents. The runtime wraps the official `anthropic` SDK. There is **no offline simulator** — `LLMClient` requires the `anthropic` package and `ANTHROPIC_API_KEY` and raises `LLMUnavailableError` if either is missing. Pure unit tests (heuristics, cost arithmetic, schema validation, file I/O) run without a key; integration tests that hit the real API are skipped when no key is set.
 
 ### 2.2 Agent Types
 - **Permanent Agents**: 15 agents (3 Council, 12 Operational) with predefined roles and models (Opus / Sonnet).
@@ -65,7 +65,7 @@ Located in `src/core/`:
 - **`claude_agent.py`** — concrete agent backed by `LLMClient`; records token usage against `CostTracker`.
 - **`model_router.py`** — maps roles to model IDs (Opus / Sonnet).
 - **`agent_factory.py`** — instantiates agents from role configs via `ModelRouter`.
-- **`llm_client.py`** — wraps the Anthropic SDK; degrades to a deterministic offline simulator (clearly labelled `[simulated:<digest>]`) when no API key / SDK is present.
+- **`llm_client.py`** — wraps the Anthropic SDK. Real-only: constructor raises `LLMUnavailableError` if the SDK is not installed or `ANTHROPIC_API_KEY` is not set. Retries with exponential backoff via tenacity.
 - **`cost_tracker.py`** — per-call price accounting with optional budget enforcement (`BudgetExceededError`).
 - **`runtime.py`** — singleton holding the shared `LLMClient`, `CostTracker` and `ToolRegistry`. Agents read from `Runtime.get()` instead of receiving each dependency through their constructor.
 - **`tool_registry.py`** — name-keyed registry of schema-based tools; can hand specs to Claude's tool-use API via `anthropic_tool_specs()`.
@@ -88,7 +88,7 @@ Orchestrator, Task Analyst, Planner, Clarifier, Researcher, Executor, Code Revie
 ## 6. Advanced Pipeline Features (`src/core/pipeline.py`)
 - **PhaseExecutionPipeline** — orchestrates phases (Analysis, Planning, Execution, Review, Final Verdict) with Council consultation gated by task tier.
 - **SelfPlayDebate** — agents argue opposing positions; `QualityArbiter` arbitrates.
-- **VerdictMatrix** — heuristic quality gate (completeness / correctness / clarity / safety); penalises offline-simulated outputs so they don't sneak past unnoticed.
+- **VerdictMatrix** — weighted quality gate (completeness / correctness / clarity / safety) computed from structural signals. `arbiter_score()` additionally delegates to the real Quality Arbiter agent for deep semantic scoring.
 - **EnsemblePatterns** — built-in collaboration shapes (chain, parallel-vote) for reuse across tasks.
 
 ## 7. User Interfaces
@@ -163,8 +163,9 @@ That's it — the registry, schema validation and Claude tool-use spec come for 
 
 ## 9. Development Environment
 - Python 3.10+
-- Optional: `anthropic` (online LLM), `openpyxl` / `python-docx` / `python-pptx` (documents), `requests` + `TAVILY_API_KEY` (web search)
-- Streamlit, Typer
+- **Required**: `anthropic` + `ANTHROPIC_API_KEY` — the system is real-only.
+- Optional: `openpyxl` / `python-docx` / `python-pptx` (document tools), `requests` + `TAVILY_API_KEY` (web search), `mermaid-cli` / `plantuml.jar` (diagram rendering).
+- Streamlit, Typer.
 
 ## 10. Roadmap
 1. Image tools (vision + OCR) for the multi-modal pipeline.

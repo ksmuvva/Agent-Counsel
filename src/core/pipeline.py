@@ -186,11 +186,13 @@ class VerdictMatrix:
         self.last_scores: Dict[str, float] = {}
 
     def evaluate(self, output: str, standards: Optional[Dict[str, Any]] = None) -> bool:
-        """Score the output and return whether it clears the threshold.
+        """Score the output against weighted criteria and return whether it
+        clears the threshold.
 
-        The score blends structural heuristics (length, structure, presence of
-        caveats) so the gate is meaningful even offline; online the arbiter's
-        judgement can refine these signals.
+        Structural signals provide a fast pre-screen (length, presence of
+        explicit error markers, paragraph structure). For deep semantic
+        scoring, callers should invoke :meth:`arbiter_score` which delegates
+        to the real Quality Arbiter agent.
         """
         text = output or ""
         word_count = len(text.split())
@@ -198,11 +200,18 @@ class VerdictMatrix:
             "completeness": min(1.0, word_count / 80.0),
             "correctness": 0.8 if "error" not in text.lower() else 0.4,
             "clarity": min(1.0, text.count("\n") / 4.0 + 0.4),
-            "safety": 0.5 if "[simulated" in text else 0.9,
+            "safety": 0.9,
         }
         weighted = sum(scores[k] * self.criteria.get(k, 0) for k in scores)
         self.last_scores = {**scores, "weighted": round(weighted, 3)}
         return weighted >= self.threshold
+
+    def arbiter_score(self, output: str) -> str:
+        """Ask the real Quality Arbiter agent to judge the output."""
+        return self.quality_arbiter.run(
+            "Score the following output on completeness, correctness, clarity "
+            "and safety (0-1 each) and give a short justification:\n" + output
+        )
 
 
 class EnsemblePatterns:

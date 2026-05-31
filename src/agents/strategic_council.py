@@ -23,10 +23,10 @@ class DomainCouncilChair(StrategicCouncilAgent):
         )
 
     def select_personas(self, task: str, available: List[str]) -> List[str]:
-        """Heuristically map a task to relevant SME personas.
+        """Map a task to relevant SME personas via keyword matching.
 
-        When running online the LLM response informs the choice; offline we fall
-        back to keyword matching so the selection is still meaningful.
+        Fast deterministic routing — callers can layer an LLM-driven decision
+        on top by invoking :meth:`run` for richer governance guidance.
         """
         text = task.lower()
         keywords = {

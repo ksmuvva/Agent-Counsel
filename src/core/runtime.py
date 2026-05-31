@@ -3,8 +3,12 @@
 Holds the process-wide LLM client, cost tracker and tool registry so that all
 agents share a single budget, connection and toolset without threading them
 through every constructor.
+
+The :class:`LLMClient` is constructed lazily on first access to ``client``,
+so importing or wiring the runtime never requires an API key — only the
+moment an agent actually wants to call Claude does.
 """
-from typing import Any, Optional
+from typing import Optional
 
 from .cost_tracker import CostTracker
 from .llm_client import LLMClient
@@ -20,9 +24,15 @@ class Runtime:
         cost_tracker: Optional[CostTracker] = None,
         tools: Optional[ToolRegistry] = None,
     ):
-        self.client = client or LLMClient()
+        self._client = client
         self.cost_tracker = cost_tracker or CostTracker()
         self.tools = tools if tools is not None else self._build_default_registry()
+
+    @property
+    def client(self) -> LLMClient:
+        if self._client is None:
+            self._client = LLMClient()
+        return self._client
 
     @staticmethod
     def _build_default_registry() -> ToolRegistry:

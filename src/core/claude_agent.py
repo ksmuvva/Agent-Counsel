@@ -1,4 +1,4 @@
-"""Concrete agent that talks to Claude (or the offline simulator)."""
+"""Concrete agent that talks to Claude via the shared runtime."""
 from typing import Any, Dict, List, Optional
 
 from .base_agent import BaseAgent
@@ -25,7 +25,6 @@ class ClaudeAgent(BaseAgent):
         self.system_prompt = system_prompt or f"You are {name}. {description}"
         self.max_tokens = max_tokens
         self.temperature = temperature
-        self.last_simulated: Optional[bool] = None
 
     def _build_prompt(self, task: str, context: Optional[Dict[str, Any]]) -> str:
         parts: List[str] = []
@@ -51,5 +50,4 @@ class ClaudeAgent(BaseAgent):
         runtime.cost_tracker.record_usage(
             self.name, self.model, response.input_tokens, response.output_tokens
         )
-        self.last_simulated = response.simulated
         return response.text

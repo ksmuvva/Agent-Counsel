@@ -1,9 +1,9 @@
 """Reasoning tools.
 
-Structured-thinking helpers that delegate to the shared :class:`LLMClient`
-(or its deterministic offline fallback). Agents call these to get reusable
-reasoning artefacts — chain-of-thought, branched alternatives, claim checks,
-task decompositions — without each agent re-inventing the prompt.
+Structured-thinking helpers that delegate to the shared :class:`LLMClient`.
+Agents call these to get reusable reasoning artefacts — chain-of-thought,
+branched alternatives, claim checks, task decompositions — without each
+agent re-inventing the prompt.
 """
 from __future__ import annotations
 

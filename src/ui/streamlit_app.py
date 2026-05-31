@@ -24,8 +24,6 @@ task = st.text_area(
 
 if st.button("Run Council", type="primary"):
     system = CouncilSystem(budget=budget, enforce_budget=enforce)
-    mode = "ONLINE (Claude API)" if system.online else "OFFLINE (simulation)"
-    st.info(f"Mode: {mode}")
 
     with st.spinner("The council is deliberating..."):
         result = system.run(task)

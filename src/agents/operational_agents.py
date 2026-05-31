@@ -20,11 +20,7 @@ class Orchestrator(ClaudeAgent):
         )
 
     def classify_tier(self, task: str) -> int:
-        """Estimate task complexity tier from signal words and length.
-
-        Online this can be delegated to the LLM; the heuristic below guarantees
-        a sensible tier offline and as a fast-path default.
-        """
+        """Estimate task complexity tier from signal words and length."""
         text = task.lower()
         score = 1
         complex_signals = [
