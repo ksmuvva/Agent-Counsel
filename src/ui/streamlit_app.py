@@ -1,4 +1,5 @@
 """Streamlit web interface for the Multi-Agent Council System."""
+import os
 import streamlit as st
 
 from agents.sme_personas import SMEPersonaManager
@@ -9,6 +10,15 @@ st.title("🏛️ Agent-Counsel — Multi-Agent Council System")
 
 with st.sidebar:
     st.header("Configuration")
+    backend = st.selectbox(
+        "Backend",
+        ["auto", "anthropic", "glm", "offline"],
+        help="'auto' tries Anthropic first, then GLM. 'glm' forces ZhipuAI GLM-4.",
+    )
+    if backend == "glm":
+        glm_key = st.text_input("GLM API Key", type="password", value=os.getenv("GLM_API_KEY", ""))
+    else:
+        glm_key = os.getenv("GLM_API_KEY", "")
     budget = st.number_input("Budget (USD)", min_value=1.0, value=20.0, step=1.0)
     enforce = st.checkbox("Enforce budget", value=False)
     st.divider()
@@ -18,14 +28,28 @@ with st.sidebar:
 
 task = st.text_area(
     "Task",
-    value="Develop a comprehensive market analysis report for a new SaaS product.",
+    value=(
+        "Design a SailPoint IdentityNow implementation plan for a 5,000-employee "
+        "enterprise migrating from a legacy on-premise IAM system."
+    ),
     height=120,
 )
 
 if st.button("Run Council", type="primary"):
-    system = CouncilSystem(budget=budget, enforce_budget=enforce)
-    mode = "ONLINE (Claude API)" if system.online else "OFFLINE (simulation)"
-    st.info(f"Mode: {mode}")
+    kwargs = {"budget": budget, "enforce_budget": enforce, "backend": backend}
+    if glm_key:
+        kwargs["glm_api_key"] = glm_key
+        if backend == "glm":
+            os.environ["COUNCIL_OPUS_MODEL"] = "glm-4"
+            os.environ["COUNCIL_SONNET_MODEL"] = "glm-4"
+            os.environ["COUNCIL_HAIKU_MODEL"] = "glm-4"
+
+    system = CouncilSystem(**kwargs)
+
+    from core.runtime import Runtime
+    be = Runtime.get().client.backend_name
+    mode_labels = {"anthropic": "ONLINE (Claude API)", "openai": "ONLINE (GLM-4)", "offline": "OFFLINE (simulation)"}
+    st.info(f"Mode: {mode_labels.get(be, be)}")
 
     with st.spinner("The council is deliberating..."):
         result = system.run(task)

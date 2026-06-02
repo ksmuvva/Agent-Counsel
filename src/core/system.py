@@ -17,9 +17,11 @@ class CouncilSystem:
         budget: float = 20.0,
         enforce_budget: bool = False,
         log: Optional[Callable[[str], None]] = None,
+        *,
+        backend: Optional[str] = None,
+        glm_api_key: Optional[str] = None,
+        glm_base_url: Optional[str] = None,
     ):
-        # Imported here (not at module top) to avoid a circular import with the
-        # agents package, which depends on ``core.claude_agent``.
         from agents import (
             DomainCouncilChair,
             EthicsSafetyAdvisor,
@@ -29,7 +31,12 @@ class CouncilSystem:
         from agents.sme_personas import SMEPersonaManager
 
         cost_tracker = CostTracker(budget=budget, enforce=enforce_budget)
-        Runtime.configure(client=LLMClient(), cost_tracker=cost_tracker)
+        client = LLMClient(
+            backend=backend,
+            glm_api_key=glm_api_key,
+            glm_base_url=glm_base_url,
+        )
+        Runtime.configure(client=client, cost_tracker=cost_tracker)
 
         self.orchestrator = Orchestrator()
         self.council: List[Any] = [
