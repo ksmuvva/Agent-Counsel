@@ -25,6 +25,7 @@ class Agent:
         system_prompt: str,
         allowed_tools: Optional[List[str]] = None,
         max_turns: int = 8,
+        timeout_s: float = 180.0,
     ):
         self.name = name
         self.description = description
@@ -32,6 +33,7 @@ class Agent:
         self.system_prompt = system_prompt
         self.allowed_tools = allowed_tools or []
         self.max_turns = max_turns
+        self.timeout_s = timeout_s
 
     def _build_prompt(self, task: str, context: Optional[Dict[str, Any]]) -> str:
         parts: List[str] = []
@@ -56,6 +58,7 @@ class Agent:
             mcp_servers=mcp_servers,
             allowed_tools=self.allowed_tools,
             max_turns=self.max_turns,
+            timeout_s=self.timeout_s,
         )
         if cost_tracker is not None:
             cost_tracker.record(self.name, result)

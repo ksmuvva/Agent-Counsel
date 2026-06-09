@@ -70,8 +70,8 @@ openpyxl
 python-docx
 python-pptx
 
-# Web search tool (optional; enables the Researcher's web_search tool)
-requests
+# Web search tool (optional; enables the Researcher's web_search tool) uses
+# httpx, already pinned above.
 
 # Testing
 pytest

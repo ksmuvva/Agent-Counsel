@@ -15,14 +15,18 @@ app = typer.Typer(help="Agent-Counsel: Multi-Agent Council System CLI")
 def run(
     task: str = typer.Argument(..., help="The task for the council to execute."),
     budget: float = typer.Option(20.0, help="Spend budget in USD."),
-    enforce: bool = typer.Option(False, help="Abort if the budget is exceeded."),
+    enforce: bool = typer.Option(False, help="Stop the pipeline if the budget is exceeded."),
     json_output: bool = typer.Option(False, "--json", help="Emit the full result as JSON."),
+    max_revisions: int = typer.Option(1, help="Automatic revision rounds on a FAIL verdict."),
 ):
     """Run a task through the full phase execution pipeline (real agents)."""
 
     async def _go():
         system = CouncilSystem(
-            budget=budget, enforce_budget=enforce, log=lambda m: typer.echo(f"  • {m}")
+            budget=budget,
+            enforce_budget=enforce,
+            log=lambda m: typer.echo(f"  • {m}"),
+            max_revisions=max_revisions,
         )
         result = await system.run(task)
         if json_output:
