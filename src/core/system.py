@@ -15,9 +15,12 @@ class CouncilSystem:
         budget: float = 20.0,
         enforce_budget: bool = False,
         log: Optional[Callable[[str], None]] = None,
+        max_revisions: int = 1,
     ) -> None:
         self.cost_tracker = CostTracker(budget=budget, enforce=enforce_budget)
-        self.pipeline = PhaseExecutionPipeline(self.cost_tracker, log=log)
+        self.pipeline = PhaseExecutionPipeline(
+            self.cost_tracker, log=log, max_revisions=max_revisions
+        )
 
     async def run(self, task: str) -> PipelineResult:
         return await self.pipeline.run(task)

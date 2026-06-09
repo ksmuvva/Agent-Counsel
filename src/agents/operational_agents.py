@@ -84,6 +84,7 @@ def executor() -> Agent:
         ),
         allowed_tools=list(DOCUMENT_TOOL_NAMES),
         max_turns=12,
+        timeout_s=300.0,
     )
 
 

@@ -46,6 +46,30 @@ def test_parse_personas():
 def test_parse_verdict():
     assert _parse_verdict("Looks good.\nVERDICT: PASS") is True
     assert _parse_verdict("Needs work.\nVERDICT: FAIL") is False
+    assert _parse_verdict("no verdict at all") is False
+    # The reviewer often restates the rubric before deciding — only the last
+    # verdict marker counts.
+    assert _parse_verdict(
+        "I must end with 'VERDICT: PASS' or 'VERDICT: FAIL'.\n"
+        "The solution has gaps.\nVERDICT: FAIL"
+    ) is False
+
+
+def test_output_dir_confinement(tmp_path, monkeypatch):
+    from tools.document_tools import _resolve_path
+
+    base = tmp_path / "outputs"
+    base.mkdir()
+    monkeypatch.setenv("COUNCIL_OUTPUT_DIR", str(base))
+    inside = base / "report.docx"
+    assert _resolve_path(str(inside)) == str(inside)
+    with pytest.raises(ValueError):
+        _resolve_path(str(tmp_path / "escape.docx"))
+    with pytest.raises(ValueError):
+        _resolve_path(str(base / ".." / "escape.docx"))
+    # Unset → unconfined (default behaviour preserved)
+    monkeypatch.delenv("COUNCIL_OUTPUT_DIR")
+    assert _resolve_path(str(tmp_path / "anywhere.docx"))
 
 
 def test_cost_tracker_uses_real_sdk_numbers():

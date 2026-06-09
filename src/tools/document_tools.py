@@ -21,6 +21,22 @@ def _err(text: str) -> Dict[str, Any]:
     return {"content": [{"type": "text", "text": f"ERROR: {text}"}], "is_error": True}
 
 
+def _resolve_path(raw: str) -> str:
+    """Resolve a model-supplied path, confining it to COUNCIL_OUTPUT_DIR if set.
+
+    The model chooses these paths, so without confinement it could read or
+    overwrite arbitrary files on the host. Unset (the default) preserves
+    unrestricted behaviour for local/dev use.
+    """
+    path = os.path.realpath(raw)
+    base = os.getenv("COUNCIL_OUTPUT_DIR")
+    if base:
+        base_abs = os.path.realpath(base)
+        if os.path.commonpath([base_abs, path]) != base_abs:
+            raise ValueError(f"path {raw!r} is outside COUNCIL_OUTPUT_DIR ({base})")
+    return path
+
+
 # --------------------------------------------------------------------------- #
 # Excel
 # --------------------------------------------------------------------------- #
@@ -33,13 +49,14 @@ async def write_excel(args: Dict[str, Any]) -> Dict[str, Any]:
     except ImportError:
         return _err("openpyxl is not installed (pip install openpyxl).")
     try:
+        path = _resolve_path(args["path"])
         rows = json.loads(args["rows_json"])
         wb = openpyxl.Workbook()
         ws = wb.active
         for row in rows:
             ws.append(row if isinstance(row, list) else [row])
-        wb.save(args["path"])
-        return _ok(f"Wrote {len(rows)} rows to {args['path']}")
+        wb.save(path)
+        return _ok(f"Wrote {len(rows)} rows to {path}")
     except Exception as exc:  # surface real errors to the model
         return _err(str(exc))
 
@@ -51,7 +68,7 @@ async def read_excel(args: Dict[str, Any]) -> Dict[str, Any]:
     except ImportError:
         return _err("openpyxl is not installed (pip install openpyxl).")
     try:
-        wb = openpyxl.load_workbook(args["path"], data_only=True)
+        wb = openpyxl.load_workbook(_resolve_path(args["path"]), data_only=True)
         ws = wb.active
         rows = [list(r) for r in ws.iter_rows(values_only=True)]
         return _ok(str(rows))
@@ -69,11 +86,12 @@ async def write_word(args: Dict[str, Any]) -> Dict[str, Any]:
     except ImportError:
         return _err("python-docx is not installed (pip install python-docx).")
     try:
+        path = _resolve_path(args["path"])
         document = docx.Document()
         for paragraph in args["content"].split("\n"):
             document.add_paragraph(paragraph)
-        document.save(args["path"])
-        return _ok(f"Wrote document to {args['path']}")
+        document.save(path)
+        return _ok(f"Wrote document to {path}")
     except Exception as exc:
         return _err(str(exc))
 
@@ -85,7 +103,7 @@ async def read_word(args: Dict[str, Any]) -> Dict[str, Any]:
     except ImportError:
         return _err("python-docx is not installed (pip install python-docx).")
     try:
-        document = docx.Document(args["path"])
+        document = docx.Document(_resolve_path(args["path"]))
         return _ok("\n".join(p.text for p in document.paragraphs))
     except Exception as exc:
         return _err(str(exc))
@@ -107,6 +125,7 @@ async def write_powerpoint(args: Dict[str, Any]) -> Dict[str, Any]:
     except ImportError:
         return _err("python-pptx is not installed (pip install python-pptx).")
     try:
+        path = _resolve_path(args["path"])
         slides = json.loads(args["slides_json"])
         prs = Presentation()
         layout = prs.slide_layouts[1]
@@ -114,8 +133,8 @@ async def write_powerpoint(args: Dict[str, Any]) -> Dict[str, Any]:
             slide = prs.slides.add_slide(layout)
             slide.shapes.title.text = spec.get("title", "")
             slide.placeholders[1].text = spec.get("body", "")
-        prs.save(args["path"])
-        return _ok(f"Wrote {len(slides)} slides to {args['path']}")
+        prs.save(path)
+        return _ok(f"Wrote {len(slides)} slides to {path}")
     except Exception as exc:
         return _err(str(exc))
 
@@ -129,13 +148,16 @@ async def web_search(args: Dict[str, Any]) -> Dict[str, Any]:
     if not api_key:
         return _err("web_search requires TAVILY_API_KEY to be set.")
     try:
-        import requests
+        import httpx
 
-        resp = requests.post(
-            "https://api.tavily.com/search",
-            json={"api_key": api_key, "query": args["query"], "max_results": 5},
-            timeout=30,
-        )
+        # Async client: a sync HTTP call here would block the event loop and
+        # stall every other agent running concurrently in the pipeline.
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.tavily.com/search",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"query": args["query"], "max_results": 5},
+            )
         resp.raise_for_status()
         results = resp.json().get("results", [])
         lines = [f"- {r.get('title')}: {r.get('url')}\n  {r.get('content', '')[:300]}" for r in results]

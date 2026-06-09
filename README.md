@@ -10,7 +10,7 @@ Agent-Counsel is a multi-agent system that tackles complex tasks through collabo
 - **15 Permanent Agents**: 3 Strategic Council agents and 12 Operational agents, each with a defined role and model (Opus or Sonnet).
 - **10 Dynamic SME Personas**: On-demand domain experts, engaged automatically when the Council selects them for a task.
 - **Phase Execution Pipeline**: A real async workflow — tier classification → analysis → Council consultation (Tier 3-4) → SME input → planning → execution → adversarial critique + verification → final verdict — where each phase is an actual agent run.
-- **Adversarial review & verdict gate**: A Critic attacks the output along five vectors, a Verifier fact-checks it, and a Reviewer issues a PASS/FAIL verdict parsed from its own output.
+- **Adversarial review & verdict gate**: A Critic attacks the output along five vectors, a Verifier fact-checks it, and a Reviewer issues a PASS/FAIL verdict parsed from its own output. On FAIL, the Executor automatically revises the solution and the gate re-runs (bounded by `--max-revisions`, default 1).
 - **Real document & web tools**: Genuine Excel/Word/PowerPoint read/write (`openpyxl`, `python-docx`, `python-pptx`) and web search (Tavily), executed in-process and fed back into the agent's reasoning.
 - **Real cost tracking**: Per-agent USD cost and turn counts taken directly from the SDK's reported usage — actual billed amounts, with optional budget enforcement.
 - **Dual UI**: A Typer CLI for automation and a Streamlit web app for interactive use.
@@ -95,6 +95,10 @@ Agent-Counsel is a multi-agent system that tackles complex tasks through collabo
 
     # Optional — enable the Researcher's real web_search tool:
     export TAVILY_API_KEY="tvly-..."
+
+    # Optional — confine all document-tool reads/writes to one directory
+    # (recommended outside local dev; unset means unrestricted):
+    export COUNCIL_OUTPUT_DIR="./outputs"
     ```
 
 ### How it works (real agents, real tools)
